@@ -118,10 +118,11 @@ function App() {
       setMessage("Erro ao conectar ao sistema. Verifique a configuração do Firebase.");
       setIsAuthReady(true);
     }
-  }, []);
+  }, []); // Dependência vazia, pois essa inicialização acontece apenas uma vez.
 
   // Fetch products from Firestore
   useEffect(() => {
+    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance) return;
 
     const productsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/products`);
@@ -139,11 +140,13 @@ function App() {
       setMessage("Erro ao carregar produtos. Verifique as regras de segurança do Firestore e o caminho 'default-app-id'.");
     });
 
+    // Removido dbInstance das dependências aqui. isAuthReady e appIdForBuild são suficientes.
     return () => unsubscribeProducts();
-  }, [isAuthReady, dbInstance]);
+  }, [isAuthReady]); 
 
   // useEffect para buscar promoções do Firestore
   useEffect(() => {
+    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance) return;
 
     const promotionsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/promotions`);
@@ -161,11 +164,13 @@ function App() {
       setMessage("Erro ao carregar promoções. Verifique as regras de segurança do Firestore.");
     });
 
+    // Removido dbInstance das dependências aqui. isAuthReady e appIdForBuild são suficientes.
     return () => unsubscribePromotions();
-  }, [isAuthReady, dbInstance]);
+  }, [isAuthReady]);
 
   // useEffect para buscar estatísticas de rotas do Firestore
   useEffect(() => {
+    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance) return;
 
     // Monitora a coleção de estatísticas de rotas
@@ -183,12 +188,14 @@ function App() {
       setMessage("Erro ao carregar estatísticas de rotas.");
     });
 
+    // Removido dbInstance das dependências aqui. isAuthReady e appIdForBuild são suficientes.
     return () => unsubscribeRouteStats();
-  }, [isAuthReady, dbInstance]);
+  }, [isAuthReady]);
 
 
   // Fetch orders from Firestore (for the 'Pedidos Finalizados' section)
   useEffect(() => {
+    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance || !userId) return;
 
     // A coleção de pedidos é específica do usuário e usa o appIdForBuild
@@ -207,8 +214,9 @@ function App() {
       setMessage("Erro ao carregar pedidos. Verifique as regras de segurança do Firestore.");
     });
 
+    // Removido dbInstance das dependências aqui. isAuthReady, userId e appIdForBuild são suficientes.
     return () => unsubscribeOrders();
-  }, [isAuthReady, dbInstance, userId]);
+  }, [isAuthReady, userId]);
 
   // Function to add a product or promotion to the cart or update its quantity
   const addToCart = async (itemToAdd, isPromo = false) => {
