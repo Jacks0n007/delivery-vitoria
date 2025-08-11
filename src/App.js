@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, query, addDoc, updateDoc, doc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, query, addDoc, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 
 
 // Sua configuração do Firebase que você copiou do console
@@ -14,93 +14,63 @@ const firebaseConfig = {
   appId: "1:97567737035:web:0b509a3c0bb0242474c74e" // SEU VALOR AQUI
 };
 
-// Inicializa o Firebase para o aplicativo. Esta variável 'app' será usada para outros serviços.
-// A inicialização foi movida para dentro do useEffect para garantir que ocorra apenas uma vez e após a verificação de config.
-let appInstance; // Usamos um nome diferente para evitar conflito com 'app' no escopo do React
+// Inicializa o Firebase para o aplicativo.
+let appInstance;
 let dbInstance;
 let authInstance;
 
-// IMPORTANT: The __initial_auth_token and __app_id are provided by the Canvas environment.
-// We keep them as fallback/for Canvas environment.
-const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+// CORREÇÃO ESSENCIAL PARA NETLIFY/LOCAL:
+// __initial_auth_token e __app_id são variáveis do ambiente Canvas (aqui onde conversamos).
+// Para builds fora do Canvas (no Netlify ou localmente), elas NÃO EXISTEM.
+// Definimos valores padrão adequados para esses ambientes.
+const initialAuthTokenForBuild = null; // Não usaremos um token customizado fora do Canvas.
+const appIdForBuild = 'default-app-id'; // Usamos o ID que você configurou no Firestore para o caminho público.
 
 
 // Main App component for the Order Separator
 function App() {
-  // State to store products loaded from Firestore
   const [products, setProducts] = useState([]);
-  // State to manage items in the cart (pending order)
   const [cart, setCart] = useState([]);
-  // State to store finalized orders
   const [orders, setOrders] = useState([]);
-  // State to manage a simple loading indicator
   const [loading, setLoading] = useState(false);
-  // State for messages to the user (e.g., "Pedido realizado!")
   const [message, setMessage] = useState('');
-  // State to control the visibility of the registration modal
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
-  // State to control the visibility of the delivery fees modal
   const [showDeliveryFeesModal, setShowDeliveryFeesModal] = useState(false);
-  // State to control the visibility of the chat modal
   const [showChatModal, setShowChatModal] = useState(false);
-  // State to control the visibility of the product management modal
   const [showProductManagementModal, setShowProductManagementModal] = useState(false);
-  // State for the chat message input
   const [chatMessage, setChatMessage] = useState('');
-  // State to store registered client information (for prototype)
   const [registeredClient, setRegisteredClient] = useState(null);
-  // State to store the authenticated user ID
   const [userId, setUserId] = useState(null);
-  // State to track if Firebase Auth is ready
   const [isAuthReady, setIsAuthReady] = useState(false);
 
+  // Estados para a nova modal de decisão de entrega
+  const [showDeliveryDecisionModal, setShowDeliveryDecisionModal] = useState(false);
+  const [selectedOrderForDelivery, setSelectedOrderForDelivery] = useState(null);
+  const [selectedDeliveryArea, setSelectedDeliveryArea] = useState('');
 
-  // --- Client Registration Form States ---
+  // Estado para armazenar as estatísticas de rotas
+  const [routeStats, setRouteStats] = useState({});
+
+
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
   const [clientAddress, setClientAddress] = useState('');
   const [clientComplement, setClientComplement] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('Dinheiro'); // Default payment
-  const [deliveryOption, setDeliveryOption] = useState('Receber em Casa'); // Default delivery
+  const [paymentMethod, setPaymentMethod] = useState('Dinheiro');
+  const [deliveryOption, setDeliveryOption] = useState('Receber em Casa');
 
-  // --- Product Management Form States ---
   const [newProductName, setNewProductName] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
   const [newProductStock, setNewProductStock] = useState('');
   const [newProductImageUrl, setNewProductImageUrl] = useState('');
 
+  // PROMOÇÕES AGORA SÃO CARREGADAS DO FIREBASE
+  const [promotions, setPromotions] = useState([]);
 
-  // Sample promotions (these are still static for now)
-  const [promotions] = useState([
-    {
-      id: 'promo-arroz',
-      name: 'Super Arroz Camil na Promoção!',
-      description: 'Arroz Camil 5kg com 15% de desconto!',
-      originalPrice: 25.50,
-      promoPrice: 21.67, // 25.50 * 0.85
-      imageUrl: 'https://placehold.co/100x100/FF0000/FFFFFF?text=Arroz+Camil+Promo'
-    },
-    {
-      id: 'promo-feijao',
-      name: 'Feijão Kicaldo da Semana!',
-      description: 'Feijão Carioca Kicaldo 1kg por apenas R$ 7.50!',
-      originalPrice: 8.90,
-      promoPrice: 7.50,
-      imageUrl: 'https://placehold.co/100x100/FF0000/FFFFFF?text=Feijao+Kicaldo+Promo'
-    },
-    {
-      id: 'promo-cafe-pao',
-      name: 'Combo Café Pilão + Pão Pullman!',
-      description: 'Café Pilão 500g e Pão de Forma Pullman juntos por R$ 20.00!',
-      originalPrice: 15.00 + 6.80,
-      promoPrice: 20.00,
-      imageUrl: 'https://placehold.co/100x100/FF0000/FFFFFF?text=Combo+Cafe+Pao'
-    },
-  ]);
 
-  // Delivery addresses and their fees (still static for now)
+  // Áreas de entrega e suas taxas (adicionada opção "Retirar no Local")
   const [deliveryAreas] = useState([
+    { id: 'retirar_no_local', name: 'Retirar no Local', fee: 0.00 },
     { id: 'itanhanga', name: 'Itanhangá', fee: 3.00 },
     { id: 'rio-das-pedras', name: 'Rio das Pedras', fee: 6.00 },
     { id: 'morro-do-banco', name: 'Morro do Banco', fee: 7.00 },
@@ -111,12 +81,12 @@ function App() {
     if (Object.keys(firebaseConfig).length === 0) {
       console.error("Firebase config is missing. Please ensure firebaseConfig is correctly set.");
       setMessage("Erro: Configuração do Firebase ausente.");
-      setIsAuthReady(true); // Mark as ready to avoid infinite loading if config is missing
+      setIsAuthReady(true);
       return;
     }
 
     try {
-      if (!appInstance) { // Initialize Firebase app only once
+      if (!appInstance) {
         appInstance = initializeApp(firebaseConfig);
         dbInstance = getFirestore(appInstance);
         authInstance = getAuth(appInstance);
@@ -127,35 +97,34 @@ function App() {
           setUserId(user.uid);
         } else {
           try {
-            if (initialAuthToken) {
-              await signInWithCustomToken(authInstance, initialAuthToken);
+            // Usa initialAuthTokenForBuild (que é null fora do Canvas) ou signInAnonymously
+            if (initialAuthTokenForBuild) { // Esta condição será falsa fora do Canvas
+              await signInWithCustomToken(authInstance, initialAuthTokenForBuild);
             } else {
-              await signInAnonymously(authInstance);
+              await signInAnonymously(authInstance); // Autenticação anônima para ambientes externos
             }
           } catch (error) {
             console.error("Firebase Auth Error during sign-in:", error);
             setMessage("Erro na autenticação. Tente novamente.");
-            // Fallback: generate a random user ID for unauthenticated access if anonymous sign-in fails
-            setUserId(crypto.randomUUID());
+            setUserId(crypto.randomUUID()); // Fallback: gera um ID de usuário aleatório
           }
         }
-        setIsAuthReady(true); // Mark auth as ready regardless of success or failure
+        setIsAuthReady(true);
       });
 
-      return () => unsubscribeAuth(); // Cleanup auth listener on component unmount
+      return () => unsubscribeAuth();
     } catch (error) {
       console.error("Failed to initialize Firebase services:", error);
       setMessage("Erro ao conectar ao sistema. Verifique a configuração do Firebase.");
-      setIsAuthReady(true); // Ensure UI doesn't hang on loading
+      setIsAuthReady(true);
     }
-  }, []); // Run only once on component mount
+  }, []);
 
   // Fetch products from Firestore
   useEffect(() => {
-    if (!isAuthReady || !dbInstance) return; // Wait for auth to be ready and dbInstance to be initialized
+    if (!isAuthReady || !dbInstance) return;
 
-    // The collection path for public products
-    const productsCollectionRef = collection(dbInstance, `artifacts/${appId}/public/data/products`);
+    const productsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/products`);
     const q = query(productsCollectionRef);
 
     const unsubscribeProducts = onSnapshot(q, (snapshot) => {
@@ -167,18 +136,63 @@ function App() {
       console.log("Produtos carregados do Firestore:", productsData);
     }, (error) => {
       console.error("Error fetching products from Firestore:", error);
-      setMessage("Erro ao carregar produtos. Verifique as regras de segurança do Firestore.");
+      setMessage("Erro ao carregar produtos. Verifique as regras de segurança do Firestore e o caminho 'default-app-id'.");
     });
 
-    return () => unsubscribeProducts(); // Cleanup listener
-  }, [isAuthReady, dbInstance, appId]); // Re-run when auth is ready or dbInstance changes
+    return () => unsubscribeProducts();
+  }, [isAuthReady, dbInstance]);
+
+  // useEffect para buscar promoções do Firestore
+  useEffect(() => {
+    if (!isAuthReady || !dbInstance) return;
+
+    const promotionsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/promotions`);
+    const q = query(promotionsCollectionRef);
+
+    const unsubscribePromotions = onSnapshot(q, (snapshot) => {
+      const promotionsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      }));
+      setPromotions(promotionsData);
+      console.log("Promoções carregadas do Firestore:", promotionsData);
+    }, (error) => {
+      console.error("Error fetching promotions from Firestore:", error);
+      setMessage("Erro ao carregar promoções. Verifique as regras de segurança do Firestore.");
+    });
+
+    return () => unsubscribePromotions();
+  }, [isAuthReady, dbInstance]);
+
+  // useEffect para buscar estatísticas de rotas do Firestore
+  useEffect(() => {
+    if (!isAuthReady || !dbInstance) return;
+
+    // Monitora a coleção de estatísticas de rotas
+    const routeStatsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/deliveryRoutesStats`);
+    
+    const unsubscribeRouteStats = onSnapshot(routeStatsCollectionRef, (snapshot) => {
+      const stats = {};
+      snapshot.docs.forEach(doc => {
+        stats[doc.id] = doc.data();
+      });
+      setRouteStats(stats);
+      console.log("Estatísticas de rotas carregadas:", stats);
+    }, (error) => {
+      console.error("Error fetching route stats from Firestore:", error);
+      setMessage("Erro ao carregar estatísticas de rotas.");
+    });
+
+    return () => unsubscribeRouteStats();
+  }, [isAuthReady, dbInstance]);
+
 
   // Fetch orders from Firestore (for the 'Pedidos Finalizados' section)
   useEffect(() => {
     if (!isAuthReady || !dbInstance || !userId) return;
 
-    // The collection path for user-specific orders
-    const ordersCollectionRef = collection(dbInstance, `artifacts/${appId}/users/${userId}/orders`);
+    // A coleção de pedidos é específica do usuário e usa o appIdForBuild
+    const ordersCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`);
     const q = query(ordersCollectionRef);
 
     const unsubscribeOrders = onSnapshot(q, (snapshot) => {
@@ -193,62 +207,145 @@ function App() {
       setMessage("Erro ao carregar pedidos. Verifique as regras de segurança do Firestore.");
     });
 
-    return () => unsubscribeOrders(); // Cleanup listener
-  }, [isAuthReady, dbInstance, userId, appId]); // Re-run when auth is ready, dbInstance, or userId changes
-
+    return () => unsubscribeOrders();
+  }, [isAuthReady, dbInstance, userId]);
 
   // Function to add a product or promotion to the cart or update its quantity
-  const addToCart = (itemToAdd, isPromo = false) => {
+  const addToCart = async (itemToAdd, isPromo = false) => {
+    const priceToUse = isPromo ? itemToAdd.promoPrice : itemToAdd.price;
+    const noteExtra = isPromo ? ` (Promoção: ${itemToAdd.name.replace('!', '')})` : '';
+
     setCart((prevCart) => {
       const existingItem = prevCart.find((item) => item.id === itemToAdd.id);
-      let priceToUse = isPromo ? itemToAdd.promoPrice : itemToAdd.price;
-      let noteExtra = isPromo ? ` (Promoção: ${itemToAdd.name.replace('!', '')})` : ''; // Clean up name for note
 
       if (existingItem) {
-        // If item already in cart, increment quantity
         return prevCart.map((item) =>
           item.id === itemToAdd.id
-            ? { ...item, quantity: item.quantity + 1, price: priceToUse } // Update price if it was added from promo later
+            ? { ...item, quantity: item.quantity + 1, price: priceToUse }
             : item
         );
       } else {
-        // If new item, add to cart with quantity 1, empty note, and the specific price
         return [...prevCart, {
           id: itemToAdd.id,
           name: itemToAdd.name,
           price: priceToUse,
           quantity: 1,
           note: noteExtra,
-          isPromoItem: isPromo, // Flag to indicate if it's a promotion item
-          imageUrl: itemToAdd.imageUrl // Keep the image URL in the cart item
+          isPromoItem: isPromo,
+          imageUrl: itemToAdd.imageUrl
         }];
       }
     });
-    setMessage(`"${itemToAdd.name}" adicionado ao carrinho!`);
+
+    if (!dbInstance) {
+      setMessage("Erro: Banco de dados não disponível para atualizar estoque.");
+      return;
+    }
+
+    try {
+      const productRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/products`, itemToAdd.id);
+      const productSnap = await getDoc(productRef);
+      
+      if (productSnap.exists()) {
+        const currentStock = productSnap.data().stock || 0;
+        if (currentStock > 0) {
+          await updateDoc(productRef, { stock: currentStock - 1 });
+          setMessage(`"${itemToAdd.name}" adicionado ao carrinho! Estoque atualizado.`);
+        } else {
+          setMessage(`"${itemToAdd.name}" está fora de estoque.`);
+          // Opcionalmente, remova o item do carrinho se a atualização de estoque falhou devido a estoque 0
+          setCart(prevCart => prevCart.filter(item => item.id !== itemToAdd.id));
+        }
+      } else {
+        // Log para depuração: se o item da promoção não for encontrado na coleção de produtos.
+        console.warn(`Item de promoção "${itemToAdd.name}" (ID: ${itemToAdd.id}) não encontrado na coleção de produtos para atualização de estoque.`);
+        setMessage(`"${itemToAdd.name}" adicionado ao carrinho, mas o estoque não pôde ser atualizado (produto não encontrado).`);
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar estoque no Firestore (adicionar):", error);
+      setMessage("Erro ao atualizar estoque.");
+    }
   };
 
 
   // Function to remove an item from the cart
-  const removeFromCart = (itemId) => {
+  const removeFromCart = async (itemId) => {
+    const itemToRemove = cart.find(item => item.id === itemId);
+
     setCart((prevCart) => prevCart.filter((item) => item.id !== itemId));
+
+    if (itemToRemove && dbInstance) {
+      try {
+        const productRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/products`, itemToRemove.id);
+        const productSnap = await getDoc(productRef);
+        
+        if (productSnap.exists()) {
+          const currentStock = productSnap.data().stock || 0;
+          await updateDoc(productRef, { stock: currentStock + itemToRemove.quantity }); // Adiciona de volta a quantidade total removida do carrinho
+          setMessage(`"${itemToRemove.name}" removido do carrinho. Estoque atualizado.`);
+        }
+      } catch (error) {
+        console.error("Erro ao atualizar estoque no Firestore (remover):", error);
+        setMessage("Erro ao atualizar estoque.");
+      }
+    }
   };
 
+
   // Function to update the quantity of an item in the cart
-  const updateQuantity = (itemId, newQuantity) => {
-    setCart((prevCart) =>
-      prevCart.map((item) =>
-        item.id === itemId
-          ? { ...item, quantity: Math.max(1, newQuantity) } // Ensure quantity is at least 1
-          : item
-      )
-    );
+  const updateQuantity = async (itemId, newQuantity) => {
+    const oldItem = cart.find(item => item.id === itemId);
+    if (!oldItem) return;
+
+    const quantityDifference = newQuantity - oldItem.quantity;
+
+    if (!dbInstance) {
+      setMessage("Erro: Banco de dados não disponível para atualizar estoque.");
+      return;
+    }
+
+    try {
+      const productRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/products`, itemId);
+      const productSnap = await getDoc(productRef);
+
+      if (productSnap.exists()) {
+        const currentStock = productSnap.data().stock || 0;
+        let newStock = currentStock - quantityDifference;
+
+        if (newStock >= 0) {
+          await updateDoc(productRef, { stock: newStock });
+          setCart((prevCart) =>
+            prevCart.map((item) =>
+              item.id === itemId
+                ? { ...item, quantity: Math.max(1, newQuantity) }
+                : item
+            )
+          );
+          setMessage(`Quantidade de "${oldItem.name}" atualizada. Estoque: ${newStock}`);
+        } else {
+          setMessage(`Não há estoque suficiente de "${oldItem.name}" para esta quantidade.`);
+          // Reverte a quantidade no carrinho para o estoque máximo disponível
+          setCart((prevCart) =>
+            prevCart.map((item) =>
+              item.id === itemId
+                ? { ...item, quantity: currentStock + oldItem.quantity } // Define para o estoque atual + o que já estava no carrinho
+                : item
+            )
+          );
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao atualizar estoque no Firestore (quant):", error);
+      setMessage("Erro ao atualizar estoque.");
+    }
   };
+
 
   // Function to update the note for a specific item in the cart
   const updateItemNote = (itemId, newNote) => {
     setCart((prevCart) =>
       prevCart.map((item) => {
-        let cleanNote = newNote.replace(` (Promoção: ${item.name.replace('!', '')})`, '').trim(); // Remove promo note for editing
+        let cleanNote = newNote.replace(` (Promoção: ${item.name.replace('!', '')})`, '').trim(); // Remove a nota de promoção para edição
         let finalNote = item.isPromoItem ? ` (Promoção: ${item.name.replace('!', '')}) ${cleanNote}`.trim() : cleanNote;
         return item.id === itemId
           ? { ...item, note: finalNote }
@@ -275,16 +372,16 @@ function App() {
       const newOrderData = {
         items: cart,
         total: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
-        status: 'Pendente',
+        status: 'Pendente', // Status inicial
         timestamp: new Date().toLocaleString('pt-BR'),
         clientInfo: registeredClient,
-        userId: userId, // Store the user ID with the order
+        userId: userId, // Armazena o ID do usuário com o pedido
       };
 
-      // Add the order to Firestore in a user-specific collection
-      await addDoc(collection(dbInstance, `artifacts/${appId}/users/${userId}/orders`), newOrderData);
+      // Adiciona o pedido ao Firestore em uma coleção específica do usuário
+      await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`), newOrderData);
 
-      setCart([]); // Clear the cart after finalizing the order
+      setCart([]); // Limpa o carrinho após finalizar o pedido
       setLoading(false);
       setMessage(`Pedido realizado com sucesso!`);
     } catch (error) {
@@ -303,13 +400,69 @@ function App() {
     }
 
     try {
-      // Reference to the specific order document
-      const orderDocRef = doc(dbInstance, `artifacts/${appId}/users/${userId}/orders`, orderId);
-      await updateDoc(orderDocRef, { status: newStatus });
-      setMessage(`Status do pedido #${orderId} atualizado para ${newStatus}`);
+      const orderDocRef = doc(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`, orderId);
+      
+      // Se o status for 'Separado', abre a modal de decisão de entrega
+      if (newStatus === 'Separado') {
+        const orderToDecide = orders.find(order => order.id === orderId);
+        if (orderToDecide) {
+          setSelectedOrderForDelivery(orderToDecide);
+          setShowDeliveryDecisionModal(true);
+          setMessage(`Pedido #${orderId.substring(0,8)}... pronto para decisão de entrega!`);
+        } else {
+          setMessage("Erro: Pedido não encontrado para decisão de entrega.");
+        }
+      } else {
+        await updateDoc(orderDocRef, { status: newStatus });
+        setMessage(`Status do pedido #${orderId.substring(0,8)}... atualizado para ${newStatus}`);
+      }
     } catch (error) {
       console.error("Error updating order status:", error);
       setMessage("Erro ao atualizar status do pedido.");
+    }
+  };
+
+  // Nova função para registrar a decisão de entrega/retirada do cliente
+  const handleFinalDeliveryOption = async () => {
+    if (!selectedOrderForDelivery || !selectedDeliveryArea || !dbInstance || !userId) {
+      setMessage('Erro: Informações de entrega incompletas ou sistema não pronto.');
+      return;
+    }
+
+    setLoading(true);
+    setMessage('Registrando opção de entrega...');
+
+    try {
+      const orderDocRef = doc(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`, selectedOrderForDelivery.id);
+      const chosenArea = deliveryAreas.find(area => area.id === selectedDeliveryArea);
+      const deliveryFee = chosenArea ? chosenArea.fee : 0;
+      const finalStatus = chosenArea && chosenArea.id === 'retirar_no_local' ? 'Aguardando Retirada' : 'Em Rota de Entrega';
+
+      // Atualiza o pedido com a opção de entrega e taxa
+      await updateDoc(orderDocRef, {
+        finalDeliveryOption: chosenArea ? chosenArea.name : 'Não Definido',
+        deliveryFee: deliveryFee,
+        total: selectedOrderForDelivery.total + deliveryFee, // Adiciona a taxa ao total
+        status: finalStatus // Atualiza o status final
+      });
+
+      // Atualiza as estatísticas de rota
+      const routeStatsRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/deliveryRoutesStats`, chosenArea.id);
+      
+      // Usa setDoc com merge:true para criar ou atualizar o documento da rota
+      // Se o documento não existir, ele será criado com count: 1.
+      // Se existir, o count será incrementado.
+      await setDoc(routeStatsRef, { name: chosenArea.name, count: (routeStats[chosenArea.id]?.count || 0) + 1 }, { merge: true });
+
+      setMessage(`Opção de entrega para pedido #${selectedOrderForDelivery.id.substring(0,8)}... registrada!`);
+      setShowDeliveryDecisionModal(false);
+      setSelectedOrderForDelivery(null);
+      setSelectedDeliveryArea('');
+    } catch (error) {
+      console.error("Erro ao registrar opção de entrega final:", error);
+      setMessage("Erro ao registrar opção de entrega.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -337,7 +490,7 @@ function App() {
         timestamp: new Date().toLocaleString('pt-BR')
       };
       // Store client data in a public collection
-      await addDoc(collection(dbInstance, `artifacts/${appId}/public/data/clients`), newClientData);
+      await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/public/data/clients`), newClientData);
 
       setRegisteredClient(newClientData); // Set the locally registered client
       setMessage('Cadastro realizado com sucesso!');
@@ -383,7 +536,7 @@ function App() {
       };
 
       // Add the new product to the 'products' collection in Firestore
-      await addDoc(collection(dbInstance, `artifacts/${appId}/public/data/products`), productData);
+      await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/public/data/products`), productData);
 
       setMessage('Produto adicionado com sucesso!');
       // Clear form fields after submission
@@ -424,6 +577,13 @@ function App() {
       return () => clearTimeout(timer);
     }
   }, [message]);
+
+  const currentDeliveryFee = selectedDeliveryArea ? 
+    (deliveryAreas.find(area => area.id === selectedDeliveryArea)?.fee || 0) : 0;
+  
+  const estimatedTotalWithDelivery = selectedOrderForDelivery ? 
+    (selectedOrderForDelivery.total + currentDeliveryFee) : 0;
+
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 p-4 font-sans antialiased flex flex-col items-center">
@@ -619,7 +779,7 @@ function App() {
                 ))}
                 <div className="text-right mt-6 pt-6 border-t-2 border-red-300">
                   <p className="text-2xl font-bold text-gray-800 mb-3">
-                    Total: R$ {cart.reduce((sum, item) => item.price * item.quantity, 0).toFixed(2)}
+                    Total: R$ {cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
                   </p>
                   {registeredClient && (
                     <div className="text-left bg-red-100 p-4 rounded-lg mb-4 text-base text-red-900 shadow-inner">
@@ -646,7 +806,7 @@ function App() {
 
         {/* Orders List Section */}
         <section className="w-full bg-gray-50 p-6 rounded-2xl shadow-inner mt-8">
-          <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Pedidos Finalizados</h2>
+          <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Acompanhamento de Pedidos</h2>
           {orders.length === 0 ? (
             <p className="text-gray-600 italic text-lg">Nenhum pedido finalizado ainda.</p>
           ) : (
@@ -660,16 +820,24 @@ function App() {
                     <h3 className="text-2xl font-bold text-red-800 mb-2">Pedido #{order.id.substring(0, 8)}...</h3> {/* Shortened ID for display */}
                     <p className="text-gray-700 text-sm mb-1">Data: <span className="font-medium">{order.timestamp}</span></p>
                     <p className="text-xl font-bold text-gray-900 mb-2">Total: R$ {order.total.toFixed(2)}</p>
-                    <p className={`text-lg font-bold ${order.status === 'Pendente' ? 'text-red-600' : 'text-green-600'}`}>
+                    <p className={`text-lg font-bold 
+                      ${order.status === 'Pendente' ? 'text-red-600' : 
+                         order.status === 'Em Separação' ? 'text-orange-500' :
+                         order.status === 'Separado' ? 'text-purple-600' :
+                         order.status === 'Aguardando Retirada' ? 'text-blue-600' :
+                         order.status === 'Em Rota de Entrega' ? 'text-teal-600' : 'text-green-600'}`}>
                       Status: {order.status}
                     </p>
+                    {order.finalDeliveryOption && (
+                      <p className="text-sm text-gray-600 mt-1"><span className="font-semibold">Entrega Final:</span> {order.finalDeliveryOption} {order.deliveryFee > 0 && `(R$ ${order.deliveryFee.toFixed(2)})`}</p>
+                    )}
                     {order.clientInfo && (
                       <div className="mt-3 text-sm text-gray-600 bg-gray-100 p-3 rounded-lg border border-gray-200">
                         <p><span className="font-semibold">Cliente:</span> {order.clientInfo.name}</p>
                         <p><span className="font-semibold">Telefone:</span> {order.clientInfo.phone}</p>
                         <p><span className="font-semibold">Endereço:</span> {order.clientInfo.address}{order.clientInfo.complement && `, ${order.clientInfo.complement}`}</p>
                         <p><span className="font-semibold">Pagamento:</span> {order.clientInfo.paymentMethod}</p>
-                        <p><span className="font-semibold">Entrega:</span> {order.clientInfo.deliveryOption}</p>
+                        <p><span className="font-semibold">Entrega Preferida:</span> {order.clientInfo.deliveryOption}</p>
                       </div>
                     )}
                   </div>
@@ -683,21 +851,52 @@ function App() {
                         </li>
                       ))}
                     </ul>
+                    {/* Botões de status */}
                     <div className="mt-4 flex flex-wrap gap-2">
-                      <button
-                        onClick={() => updateOrderStatus(order.id, 'Em Separação')}
-                        className="bg-red-700 hover:bg-red-800 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
-                      >
-                        Em Separação
-                      </button>
-                      <button
-                        onClick={() => updateOrderStatus(order.id, 'Separado')}
-                        className="bg-gray-700 hover:bg-gray-800 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
-                      >
-                        Marcar como Separado
-                      </button>
+                      {order.status === 'Pendente' && (
+                        <button
+                          onClick={() => updateOrderStatus(order.id, 'Em Separação')}
+                          className="bg-red-700 hover:bg-red-800 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                        >
+                          Marcar Em Separação
+                        </button>
+                      )}
+                      {order.status === 'Em Separação' && (
+                        <button
+                          onClick={() => updateOrderStatus(order.id, 'Separado')}
+                          className="bg-purple-600 hover:bg-purple-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                        >
+                          Marcar Separado (Decidir Entrega)
+                        </button>
+                      )}
+                      {/* Botões para o cliente ou admin após 'Separado' */}
+                      {(order.status === 'Aguardando Retirada' || order.status === 'Em Rota de Entrega') && (
+                        <button
+                          onClick={() => updateOrderStatus(order.id, 'Finalizado')}
+                          className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                        >
+                          Marcar como Finalizado
+                        </button>
+                      )}
                     </div>
                   </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* Route Stats Section - Novo */}
+        <section className="w-full bg-gray-50 p-6 rounded-2xl shadow-inner mt-8">
+          <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Estatísticas de Rotas</h2>
+          {Object.keys(routeStats).length === 0 ? (
+            <p className="text-gray-600 italic text-lg">Nenhum dado de rota disponível ainda.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Object.entries(routeStats).map(([routeId, data]) => (
+                <div key={routeId} className="bg-white p-4 rounded-lg shadow-md border border-gray-100">
+                  <h3 className="text-xl font-semibold text-gray-900">{data.name || routeId}</h3>
+                  <p className="text-gray-700 text-lg">Pedidos: <span className="font-bold text-red-700">{data.count}</span></p>
                 </div>
               ))}
             </div>
@@ -723,8 +922,8 @@ function App() {
               />
               <h3 className="text-xl font-bold text-white mb-2">{promo.name}</h3>
               <p className="text-red-100 text-sm mb-3 line-clamp-2">{promo.description}</p>
-              <p className="text-lg font-semibold text-red-200 line-through mb-1">De: R$ {promo.originalPrice.toFixed(2)}</p>
-              <p className="text-3xl font-extrabold text-yellow-300 mb-4 drop-shadow-lg">Por: R$ {promo.promoPrice.toFixed(2)}</p>
+              <p className="text-lg font-semibold text-red-200 line-through mb-1">De: R$ {promo.originalPrice ? promo.originalPrice.toFixed(2) : 'N/A'}</p>
+              <p className="text-3xl font-extrabold text-yellow-300 mb-4 drop-shadow-lg">Por: R$ {promo.promoPrice ? promo.promoPrice.toFixed(2) : 'N/A'}</p>
               <button
                 className="bg-white hover:bg-gray-100 text-red-700 font-bold py-2.5 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-10glow"
               >
@@ -1012,6 +1211,84 @@ function App() {
             </form>
             <button
               onClick={() => setShowProductManagementModal(false)}
+              className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-3xl"
+              aria-label="Fechar"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Delivery Decision Modal - NOVA MODAL */}
+      {showDeliveryDecisionModal && selectedOrderForDelivery && (
+        <div className="modal-overlay" onClick={() => setShowDeliveryDecisionModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Decisão de Entrega/Retirada</h2>
+            <p className="text-lg text-gray-700 mb-4 text-center">
+              Pedido <span className="font-semibold">#{selectedOrderForDelivery.id.substring(0, 8)}...</span> está separado.
+            </p>
+            <p className="text-md text-gray-600 mb-5 text-center">
+              Como você deseja proceder com este pedido?
+            </p>
+
+            <div className="space-y-4 mb-6">
+              <label htmlFor="deliveryAreaSelect" className="block text-sm font-medium text-gray-700 mb-1">Opções de Entrega/Retirada:</label>
+              <select
+                id="deliveryAreaSelect"
+                value={selectedDeliveryArea}
+                onChange={(e) => setSelectedDeliveryArea(e.target.value)}
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 bg-white text-base"
+                required
+              >
+                <option value="">Selecione uma opção</option>
+                {deliveryAreas.map((area) => (
+                  <option key={area.id} value={area.id}>
+                    {area.name} {area.fee > 0 ? `(Taxa: R$ ${area.fee.toFixed(2)})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="text-center mb-6 text-xl font-bold text-gray-800">
+              Total do Pedido: R$ {selectedOrderForDelivery.total.toFixed(2)}
+              {currentDeliveryFee > 0 && (
+                <p className="text-lg text-red-700 mt-1">Taxa de Entrega: R$ {currentDeliveryFee.toFixed(2)}</p>
+              )}
+              <p className="text-2xl text-green-700 mt-2">Total Estimado: R$ {estimatedTotalWithDelivery.toFixed(2)}</p>
+            </div>
+
+            <div className="flex justify-end space-x-4 mt-6">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowDeliveryDecisionModal(false);
+                  setSelectedOrderForDelivery(null);
+                  setSelectedDeliveryArea('');
+                }}
+                className="px-6 py-2.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold transition-colors shadow-md"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleFinalDeliveryOption}
+                disabled={loading || !selectedDeliveryArea}
+                className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
+                  ${loading || !selectedDeliveryArea ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
+              >
+                {loading ? 'Processando...' : 'Confirmar Decisão'}
+              </button>
+            </div>
+            {message && (
+              <p className="mt-3 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
+            )}
+            <button
+              onClick={() => {
+                setShowDeliveryDecisionModal(false);
+                setSelectedOrderForDelivery(null);
+                setSelectedDeliveryArea('');
+              }}
               className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-3xl"
               aria-label="Fechar"
             >
