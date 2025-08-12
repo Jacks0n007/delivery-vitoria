@@ -67,9 +67,10 @@ function App() {
 
   // Novos estados para verificação de telefone
   const [otpCode, setOtpCode] = useState('');
-  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [showOtpInput, setShowOtpInput] = useState(false); // Mantém para mostrar/esconder o campo OTP
   const [confirmationResult, setConfirmationResult] = useState(null);
   const [phoneVerified, setPhoneVerified] = useState(false); // Novo estado para verificar se o telefone foi validado
+  const [registrationStep, setRegistrationStep] = useState(1); // 1: Info e Solicitar OTP, 2: Inserir OTP
 
 
   const [newProductName, setNewProductName] = useState('');
@@ -159,9 +160,18 @@ function App() {
     }
   }, []);
 
-  // Initialize reCAPTCHA when the registration modal is shown
+  // Initialize reCAPTCHA when the registration modal is shown and step is 1
   useEffect(() => {
-    if (showRegistrationModal && isAuthReady && authInstance && !recaptchaVerifier) {
+    if (showRegistrationModal && isAuthReady && authInstance && registrationStep === 1 && !recaptchaVerifier) {
+      // Cria a div para o reCAPTCHA se ela não existir
+      let recaptchaContainer = document.getElementById('recaptcha-container');
+      if (!recaptchaContainer) {
+          recaptchaContainer = document.createElement('div');
+          recaptchaContainer.id = 'recaptcha-container';
+          // Adiciona a div em um local apropriado, talvez no corpo ou dentro do formulário
+          document.body.appendChild(recaptchaContainer); // Pode ser ajustado para ser dentro do modal
+      }
+
       window.recaptchaVerifier = new RecaptchaVerifier(authInstance, 'recaptcha-container', {
         'size': 'invisible', // Pode ser 'invisible' para um fluxo mais suave
         'callback': (response) => {
@@ -179,20 +189,21 @@ function App() {
       recaptchaVerifier = window.recaptchaVerifier; // Atribui a variável global
       recaptchaVerifier.render(); // Renderiza o reCAPTCHA
     }
-    // Cleanup function when modal closes
+    // Cleanup function when modal closes or step changes away from 1
     return () => {
         if (recaptchaVerifier) {
             recaptchaVerifier.clear();
             recaptchaVerifier = null;
             delete window.recaptchaVerifier;
-            // Limpar reCAPTCHA da DOM se for um elemento visível e não badge
             const recaptchaElement = document.getElementById('recaptcha-container');
-            if (recaptchaElement && recaptchaElement.hasChildNodes()) {
-                recaptchaElement.innerHTML = '';
+            if (recaptchaElement) {
+                recaptchaElement.innerHTML = ''; // Limpa o conteúdo
+                // Opcional: remover a div do DOM se ela foi adicionada dinamicamente e não é mais necessária
+                // recaptchaElement.parentNode.removeChild(recaptchaElement);
             }
         }
     };
-  }, [showRegistrationModal, isAuthReady]);
+  }, [showRegistrationModal, isAuthReady, registrationStep]);
 
 
   // Fetch products from Firestore
@@ -266,7 +277,7 @@ function App() {
     if (!isAuthReady || !dbInstance || !userId) return;
 
     const ordersCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`);
-    const q = query(ordersCollectionRef); // CORRIGIDO: de ordersRef para ordersCollectionRef
+    const q = query(ordersCollectionRef);
 
     const unsubscribeOrders = onSnapshot(q, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({
@@ -431,6 +442,7 @@ function App() {
     if (!registeredClient || !phoneVerified) { // Adicionado verificação de telefone
       setShowRegistrationModal(true);
       setMessage('Por favor, cadastre suas informações e valide seu telefone para continuar a finalização do pedido.');
+      setRegistrationStep(1); // Garante que o modal de registro comece na etapa 1
       return;
     }
     setCurrentPage('checkout');
@@ -579,10 +591,15 @@ function App() {
       setMessage('Por favor, digite um número de celular válido para solicitar o código.');
       return;
     }
+    // Garante que o reCAPTCHA está pronto
+    if (!window.recaptchaVerifier) {
+      setMessage('Aguarde, o sistema de segurança está carregando...');
+      return;
+    }
 
     setLoading(true);
     setMessage('Solicitando código de verificação...');
-    setShowOtpInput(false); // Esconde a entrada OTP enquanto solicita um novo
+    setShowOtpInput(true); // Exibe a entrada OTP imediatamente para feedback visual
 
     try {
         // Formata o número para o padrão E.164 (ex: +5511999999999)
@@ -590,8 +607,8 @@ function App() {
 
         const result = await signInWithPhoneNumber(authInstance, formattedPhoneNumber, window.recaptchaVerifier);
         setConfirmationResult(result);
-        setShowOtpInput(true);
         setMessage('Código enviado para o seu celular!');
+        setRegistrationStep(2); // Avança para a etapa de verificação de OTP
     } catch (error) {
         console.error("Erro ao solicitar OTP:", error);
         let errorMessage = "Erro ao solicitar código. Tente novamente.";
@@ -599,6 +616,8 @@ function App() {
             errorMessage = "Muitas tentativas. Tente novamente mais tarde.";
         } else if (error.code === 'auth/invalid-phone-number') {
             errorMessage = "Número de telefone inválido.";
+        } else if (error.code === 'auth/missing-phone-number') {
+            errorMessage = "Número de telefone ausente.";
         }
         setMessage(errorMessage);
         setShowOtpInput(false); // Esconde o campo OTP se houver erro
@@ -623,8 +642,7 @@ function App() {
       setMessage('Telefone verificado com sucesso!');
       setShowOtpInput(false); // Esconde o campo OTP após a verificação
       setOtpCode(''); // Limpa o código
-      // Se o usuário está cadastrando, permite finalizar o cadastro
-      // Se o usuário está logando, isso já foi tratado pelo onAuthStateChanged
+      // Se a verificação foi bem-sucedida, o botão de registro final será habilitado.
     } catch (error) {
       console.error("Erro ao verificar OTP:", error);
       let errorMessage = "Código inválido ou expirado. Tente novamente.";
@@ -713,6 +731,7 @@ function App() {
       setMessage('Cadastro realizado com sucesso!');
       setShowRegistrationModal(false);
       setClientPassword(''); // Limpa a senha por segurança
+      setRegistrationStep(1); // Reseta para a etapa 1 para um possível novo cadastro
 
       if (currentPage !== 'home' && currentPage !== 'checkout') {
           setCurrentPage('home'); // Redireciona para home após cadastro
@@ -891,7 +910,7 @@ function App() {
                     <button onClick={() => { setCurrentPage('stats'); setShowNavMenu(false); }}>Estatísticas de Rotas</button>
                     {/* Botão Gerenciar Produtos REMOVIDO: <button onClick={() => { setShowProductManagementModal(true); setShowNavMenu(false); }}>Gerenciar Produtos</button> */}
                     <button onClick={() => { setShowDeliveryFeesModal(true); setShowNavMenu(false); }}>Endereços e Taxas</button>
-                    <button onClick={() => { setShowRegistrationModal(true); setShowNavMenu(false); }}>Meu Cadastro</button>
+                    <button onClick={() => { setShowRegistrationModal(true); setShowNavMenu(false); setRegistrationStep(1);}}>Meu Cadastro</button> {/* Reseta step ao abrir */}
                     {/* Botão de Login/Logout condicional */}
                     {authInstance && authInstance.currentUser && !authInstance.currentUser.isAnonymous ? (
                         <button onClick={() => { handleLogout(); setShowNavMenu(false); }}>Sair da Conta</button>
@@ -911,7 +930,7 @@ function App() {
                 </div>
             ) : ( // Se não está registrado, mostra o botão de cadastro
                 <button
-                onClick={() => setShowRegistrationModal(true)}
+                onClick={() => { setShowRegistrationModal(true); setRegistrationStep(1); }} // Reseta step ao abrir
                 className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
                 title="Registro do Cliente"
                 >
@@ -1174,7 +1193,7 @@ function App() {
                       </p>
                   )}
                   <button
-                    onClick={() => setShowRegistrationModal(true)}
+                    onClick={() => { setShowRegistrationModal(true); setRegistrationStep(1); }}
                     className="mt-4 bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
                   >
                     Editar Cadastro
@@ -1239,7 +1258,7 @@ function App() {
                 Para finalizar seu pedido, precisamos das suas informações de cadastro completas e seu telefone validado. <br/>
                 Por favor, clique em **"Cadastrar Agora"** ou **"Fazer Login"** para continuar.
                 <div className="flex justify-center gap-4 mt-4">
-                  <button onClick={() => setShowRegistrationModal(true)} className="text-blue-700 hover:underline font-bold py-2 px-4 bg-white rounded-full shadow-md">Cadastrar Agora</button>
+                  <button onClick={() => {setShowRegistrationModal(true); setRegistrationStep(1); }} className="text-blue-700 hover:underline font-bold py-2 px-4 bg-white rounded-full shadow-md">Cadastrar Agora</button>
                   <button onClick={() => setShowLoginModal(true)} className="text-blue-700 hover:underline font-bold py-2 px-4 bg-white rounded-full shadow-md">Fazer Login</button>
                 </div>
               </p>
@@ -1293,192 +1312,227 @@ function App() {
 
       {/* Client Registration Modal */}
       {showRegistrationModal && (
-        <div className="modal-overlay" onClick={() => setShowRegistrationModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+        <div className="modal-overlay" onClick={() => {setShowRegistrationModal(false); setRegistrationStep(1);}}> {/* Reseta step ao fechar */}
+          <div className="modal-content !max-w-md !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">{registeredClient ? 'Editar Cadastro' : 'Novo Cadastro de Cliente'}</h2>
-            <form onSubmit={handleClientRegistration} className="space-y-4">
-              <div>
-                <label htmlFor="clientName" className="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label>
-                <input
-                  type="text"
-                  id="clientName"
-                  value={clientName}
-                  onChange={(e) => setClientName(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                  required
-                />
-              </div>
-              
-              {/* Campo de Telefone e Verificação OTP */}
-              <div>
-                <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">Número de Celular</label>
-                <div className="flex items-center space-x-2">
-                    <input
-                      type="tel"
-                      id="clientPhone"
-                      value={clientPhone}
-                      onChange={(e) => {setClientPhone(e.target.value); setPhoneVerified(false);}} // Reseta a verificação ao mudar o número
-                      className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                      placeholder="(XX) XXXXX-XXXX"
-                      required
-                      disabled={phoneVerified} // Desabilita se já verificado
-                    />
-                    {!phoneVerified && (
-                        <button
-                        type="button"
-                        onClick={handleRequestOtp}
-                        disabled={loading || !clientPhone}
-                        className={`px-4 py-2 rounded-full text-white font-bold text-sm shadow-md transition-all duration-300
-                            ${loading || !clientPhone ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
-                        >
-                        Solicitar Código
-                        </button>
-                    )}
-                    {phoneVerified && <span className="text-green-600 font-bold">✓ Verificado</span>}
+            
+            {/* Mensagem de erro/sucesso global do modal */}
+            {message && (
+              <p className="mb-4 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
+            )}
+
+            {/* Etapa 1: Informações Básicas e Solicitação de OTP */}
+            {registrationStep === 1 && (
+              <form onSubmit={(e) => { e.preventDefault(); handleRequestOtp(); }} className="space-y-4">
+                <div>
+                  <label htmlFor="clientName" className="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label>
+                  <input
+                    type="text"
+                    id="clientName"
+                    value={clientName}
+                    onChange={(e) => setClientName(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                    required
+                  />
                 </div>
-                {showOtpInput && !phoneVerified && (
-                    <div className="mt-3 flex items-center space-x-2">
-                        <input
-                            type="text"
-                            id="otpCode"
-                            value={otpCode}
-                            onChange={(e) => setOtpCode(e.target.value)}
-                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                            placeholder="Digite o código SMS"
-                            required
-                        />
+                
+                {/* Campo de Telefone e Botão de Solicitar Código */}
+                <div>
+                  <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">Número de Celular</label>
+                  <div className="flex items-center space-x-2">
+                      <input
+                        type="tel"
+                        id="clientPhone"
+                        value={clientPhone}
+                        onChange={(e) => {setClientPhone(e.target.value); setPhoneVerified(false); setOtpCode('');}} // Reseta verificação e OTP
+                        className="flex-grow p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                        placeholder="(XX) XXXXX-XXXX"
+                        required
+                        disabled={phoneVerified} // Desabilita se já verificado
+                      />
+                      {!phoneVerified && (
+                          <button
+                          type="submit" // Agora é type="submit" para submeter o formulário
+                          disabled={loading || !clientPhone || clientPhone.length < 10} // Mínimo de caracteres para telefone
+                          className={`px-4 py-2 rounded-full text-white font-bold text-sm shadow-md transition-all duration-300
+                              ${loading || !clientPhone || clientPhone.length < 10 ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                          >
+                          Solicitar Código
+                          </button>
+                      )}
+                      {phoneVerified && <span className="text-green-600 font-bold">✓ Verificado</span>}
+                  </div>
+                  {/* reCAPTCHA container - importante para a validação de telefone */}
+                  <div id="recaptcha-container" className="mt-4"></div>
+                </div>
+
+                {/* Email e Senha (obrigatórios para login seguro) */}
+                <div>
+                  <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">Email (Obrigatório para login seguro)</label>
+                  <input
+                    type="email"
+                    id="clientEmail"
+                    value={clientEmail}
+                    onChange={(e) => setClientEmail(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                    placeholder="seu.email@exemplo.com"
+                    required
+                    disabled={registeredClient && registeredClient.email && !authInstance?.currentUser?.isAnonymous}
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clientPassword" className="block text-sm font-medium text-gray-700 mb-1">Senha (Mínimo 6 caracteres)</label>
+                  <input
+                    type="password"
+                    id="clientPassword"
+                    value={clientPassword}
+                    onChange={(e) => setClientPassword(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                    placeholder="••••••••"
+                    required={true}
+                  />
+                </div>
+
+                {/* Campos de Endereço, Pagamento, Entrega (mantidos na etapa 1 para simplificar) */}
+                <div>
+                  <label htmlFor="clientAddress" className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
+                  <input
+                    type="text"
+                    id="clientAddress"
+                    value={clientAddress}
+                    onChange={(e) => setClientAddress(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                    required
+                  />
+                </div>
+                <div>
+                  <label htmlFor="clientComplement" className="block text-sm font-medium text-gray-700 mb-1">Complemento (Ex: Apt 101, Bloco B)</label>
+                  <input
+                    type="text"
+                    id="clientComplement"
+                    value={clientComplement}
+                    onChange={(e) => setClientComplement(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                    placeholder="Ex: Apartamento 101, Bloco B"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700 mb-1">Forma de Pagamento</label>
+                  <select
+                    id="paymentMethod"
+                    value={paymentMethod}
+                    onChange={(e) => setPaymentMethod(e.target.value)}
+                    className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 bg-white text-base"
+                  >
+                    <option value="Dinheiro">Dinheiro</option>
+                    <option value="Cartão de Crédito">Cartão de Crédito</option>
+                    <option value="Cartão de Débito">Cartão de Débito</option>
+                    <option value="PIX">PIX</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Opção de Entrega</label>
+                  <div className="flex items-center space-x-4">
+                    <label className="inline-flex items-center">
+                      <input
+                        type="radio"
+                        name="deliveryOption"
+                        value="Retirar no Local"
+                        checked={deliveryOption === 'Retirar no Local'}
+                        onChange={(e) => setDeliveryOption(e.target.value)}
+                        className="form-radio text-red-600 h-4 w-4"
+                      />
+                      <span className="ml-2 text-gray-800 text-base">Retirar no Local</span>
+                    </label>
+                    <label className="inline-flex items-center">
+                      <input
+                        type="radio"
+                        name="deliveryOption"
+                        value="Receber em Casa"
+                        checked={deliveryOption === 'Receber em Casa'}
+                        onChange={(e) => setDeliveryOption(e.target.value)}
+                        className="form-radio text-red-600 h-4 w-4"
+                      />
+                      <span className="ml-2 text-gray-800 text-base">Receber em Casa</span>
+                    </label>
+                  </div>
+                </div>
+                <div className="flex justify-end space-x-4 mt-6">
+                  <button
+                    type="button"
+                    onClick={() => {setShowRegistrationModal(false); setRegistrationStep(1);}}
+                    className="px-6 py-2.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold transition-colors shadow-md"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit" // Submete o formulário para handleRequestOtp
+                    disabled={loading || !clientName || !clientPhone || clientPhone.length < 10 || !clientEmail || !clientPassword || clientPassword.length < 6 || !clientAddress}
+                    className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
+                      ${loading || !clientName || !clientPhone || clientPhone.length < 10 || !clientEmail || !clientPassword || clientPassword.length < 6 || !clientAddress ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
+                  >
+                    {loading ? 'Solicitando...' : 'Solicitar Código'}
+                  </button>
+                </div>
+                <div className="text-center mt-4">
+                    <p className="text-gray-600">Já tem conta? <button type="button" onClick={() => {setShowRegistrationModal(false); setShowLoginModal(true);}} className="text-blue-700 hover:underline font-bold">Faça login</button></p>
+                </div>
+              </form>
+            )}
+
+            {/* Etapa 2: Confirmação do Código OTP */}
+            {registrationStep === 2 && (
+              <div className="space-y-4">
+                <p className="text-center text-lg text-gray-700">Um código de verificação foi enviado para **{clientPhone}**.</p>
+                <div>
+                    <label htmlFor="otpCode" className="block text-sm font-medium text-gray-700 mb-1">Código de Verificação (SMS)</label>
+                    <input
+                        type="text"
+                        id="otpCode"
+                        value={otpCode}
+                        onChange={(e) => setOtpCode(e.target.value)}
+                        className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                        placeholder="Digite o código de 6 dígitos"
+                        required
+                    />
+                </div>
+                <div className="flex justify-between space-x-4 mt-6">
+                    <button
+                        type="button"
+                        onClick={() => { setRegistrationStep(1); setOtpCode(''); setConfirmationResult(null); setMessage('');}} // Volta para a etapa 1
+                        className="px-6 py-2.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold transition-colors shadow-md"
+                    >
+                        Voltar
+                    </button>
+                    <button
+                        type="button"
+                        onClick={handleVerifyOtp}
+                        disabled={loading || !otpCode || otpCode.length !== 6} // Código OTP geralmente tem 6 dígitos
+                        className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
+                            ${loading || !otpCode || otpCode.length !== 6 ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 transform hover:scale-105'}`}
+                    >
+                        {loading ? 'Verificando...' : 'Verificar Código'}
+                    </button>
+                </div>
+                {phoneVerified && (
+                    <div className="text-center mt-4">
+                        <p className="text-green-600 font-bold text-lg">Telefone verificado! 🎉</p>
                         <button
                             type="button"
-                            onClick={handleVerifyOtp}
-                            disabled={loading || !otpCode}
-                            className={`px-4 py-2 rounded-full text-white font-bold text-sm shadow-md transition-all duration-300
-                                ${loading || !otpCode ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                            onClick={handleClientRegistration}
+                            disabled={loading}
+                            className={`mt-4 px-8 py-3 rounded-full text-white font-bold text-xl shadow-lg transition-all duration-300 glow-button
+                                ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
                         >
-                            Verificar Código
+                            {loading ? 'Registrando...' : (registeredClient ? 'Atualizar Cadastro' : 'Registrar')}
                         </button>
                     </div>
                 )}
-                {/* reCAPTCHA container - importante para a validação de telefone */}
-                <div id="recaptcha-container" className="mt-4"></div>
               </div>
+            )}
 
-              {/* Email e Senha (agora obrigatórios para login seguro) */}
-              <div>
-                <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">Email (Obrigatório para login seguro)</label>
-                <input
-                  type="email"
-                  id="clientEmail"
-                  value={clientEmail}
-                  onChange={(e) => setClientEmail(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                  placeholder="seu.email@exemplo.com"
-                  required
-                  disabled={registeredClient && registeredClient.email && !authInstance?.currentUser?.isAnonymous} // Desabilita se já tem email associado e não é anônimo
-                />
-              </div>
-              <div>
-                <label htmlFor="clientPassword" className="block text-sm font-medium text-gray-700 mb-1">Senha (Mínimo 6 caracteres)</label>
-                <input
-                  type="password"
-                  id="clientPassword"
-                  value={clientPassword}
-                  onChange={(e) => setClientPassword(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                  placeholder="••••••••"
-                  required={true} // Senha agora é sempre obrigatória para o cadastro completo
-                />
-              </div>
-
-              {/* Campos de Endereço, Pagamento, Entrega */}
-              <div>
-                <label htmlFor="clientAddress" className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
-                <input
-                  type="text"
-                  id="clientAddress"
-                  value={clientAddress}
-                  onChange={(e) => setClientAddress(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                  required
-                />
-              </div>
-              <div>
-                <label htmlFor="clientComplement" className="block text-sm font-medium text-gray-700 mb-1">Complemento (Ex: Apt 101, Bloco B)</label>
-                <input
-                  type="text"
-                  id="clientComplement"
-                  value={clientComplement}
-                  onChange={(e) => setClientComplement(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                  placeholder="Ex: Apartamento 101, Bloco B"
-                />
-              </div>
-              <div>
-                <label htmlFor="paymentMethod" className="block text-sm font-medium text-gray-700 mb-1">Forma de Pagamento</label>
-                <select
-                  id="paymentMethod"
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 bg-white text-base"
-                >
-                  <option value="Dinheiro">Dinheiro</option>
-                  <option value="Cartão de Crédito">Cartão de Crédito</option>
-                  <option value="Cartão de Débito">Cartão de Débito</option>
-                  <option value="PIX">PIX</option>
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Opção de Entrega</label>
-                <div className="flex items-center space-x-4">
-                  <label className="inline-flex items-center">
-                    <input
-                      type="radio"
-                      name="deliveryOption"
-                      value="Retirar no Local"
-                      checked={deliveryOption === 'Retirar no Local'}
-                      onChange={(e) => setDeliveryOption(e.target.value)}
-                      className="form-radio text-red-600 h-4 w-4"
-                    />
-                    <span className="ml-2 text-gray-800 text-base">Retirar no Local</span>
-                  </label>
-                  <label className="inline-flex items-center">
-                    <input
-                      type="radio"
-                      name="deliveryOption"
-                      value="Receber em Casa"
-                      checked={deliveryOption === 'Receber em Casa'}
-                      onChange={(e) => setDeliveryOption(e.target.value)}
-                      className="form-radio text-red-600 h-4 w-4"
-                    />
-                    <span className="ml-2 text-gray-800 text-base">Receber em Casa</span>
-                  </label>
-                </div>
-              </div>
-              <div className="flex justify-end space-x-4 mt-6">
-                <button
-                  type="button"
-                  onClick={() => setShowRegistrationModal(false)}
-                  className="px-6 py-2.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold transition-colors shadow-md"
-                >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  disabled={loading || !phoneVerified} // Habilita o botão apenas após verificação do telefone
-                  className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
-                    ${loading || !phoneVerified ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
-                >
-                  {loading ? 'Registrando...' : (registeredClient ? 'Atualizar Cadastro' : 'Registrar')}
-                </button>
-              </div>
-              {message && (
-                <p className="mt-3 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
-              )}
-              <div className="text-center mt-4">
-                  <p className="text-gray-600">Já tem conta? <button type="button" onClick={() => {setShowRegistrationModal(false); setShowLoginModal(true);}} className="text-blue-700 hover:underline font-bold">Faça login</button></p>
-              </div>
-            </form>
             <button
-              onClick={() => setShowRegistrationModal(false)}
+              onClick={() => {setShowRegistrationModal(false); setRegistrationStep(1);}}
               className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-3xl"
               aria-label="Fechar"
             >
@@ -1491,7 +1545,7 @@ function App() {
       {/* Login Modal */}
       {showLoginModal && (
         <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content !max-w-sm !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Fazer Login</h2>
             <form onSubmit={handleClientLogin} className="space-y-4">
               <div>
@@ -1537,7 +1591,7 @@ function App() {
                 <p className="mt-3 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
               )}
               <div className="text-center mt-4">
-                  <p className="text-gray-600">Não tem conta? <button type="button" onClick={() => {setShowLoginModal(false); setShowRegistrationModal(true);}} className="text-blue-700 hover:underline font-bold">Cadastre-se</button></p>
+                  <p className="text-gray-600">Não tem conta? <button type="button" onClick={() => {setShowLoginModal(false); setShowRegistrationModal(true); setRegistrationStep(1);}} className="text-blue-700 hover:underline font-bold">Cadastre-se</button></p>
               </div>
             </form>
             <button
@@ -1554,7 +1608,7 @@ function App() {
       {/* Delivery Fees Modal */}
       {showDeliveryFeesModal && (
         <div className="modal-overlay" onClick={() => setShowDeliveryFeesModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content !max-w-md !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Endereços e Taxas de Entrega</h2>
             <div className="space-y-4">
               {deliveryAreas.map((area) => (
@@ -1587,7 +1641,7 @@ function App() {
       {/* Chat Modal */}
       {showChatModal && (
         <div className="modal-overlay" onClick={() => setShowChatModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content !max-w-md !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Falar com a Equipe</h2>
             <div className="space-y-4">
               <textarea
@@ -1631,7 +1685,7 @@ function App() {
       {/* Product Management Modal - Manter oculto para uso interno no futuro */}
       {showProductManagementModal && (
         <div className="modal-overlay" onClick={() => setShowProductManagementModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content !max-w-md !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Gerenciar Produtos</h2>
             <form onSubmit={handleAddProduct} className="space-y-4">
               <div>
@@ -1716,7 +1770,7 @@ function App() {
       {/* Delivery Decision Modal */}
       {showDeliveryDecisionModal && selectedOrderForDelivery && (
         <div className="modal-overlay" onClick={() => setShowDeliveryDecisionModal(false)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content !max-w-md !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Decisão de Entrega/Retirada</h2>
             <p className="text-lg text-gray-700 mb-4 text-center">
               Pedido <span className="font-semibold">#{selectedOrderForDelivery.id.substring(0, 8)}...</span> está separado.
@@ -1795,6 +1849,7 @@ function App() {
 }
 
 export default App;
+
 
 
 
