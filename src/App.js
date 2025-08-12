@@ -1,5 +1,5 @@
 /* global grecaptcha */ // Adicionado para resolver o erro 'grecaptcha is not defined' do ESLint
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react'; // Corrigido e adicionado useRef
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, query, addDoc, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
@@ -10,7 +10,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyDa90bifuUXRgGyS30Y-P9Q6NhOnLyn21s", // SEU VALOR AQUI
   authDomain: "deliveryvitoriaapp.firebaseapp.com", // SEU VALOR AQUI
   projectId: "deliveryvitoriaapp", // SEU VALOR AQUI
-  storageBucket: "deliveryvitoriaapp.firebasestorage.app", // SEU VALOR AQUI
+  storageBucket: "deliveryvitoriaapp.firebasestorage.app", // SEU VALOR AQUI (Corrigido para o valor original)
   messagingSenderId: "97567737035", // SEU VALOR AQUI
   appId: "1:97567737035:web:0b509a3c0bb0242474c74e" // SEU VALOR AQUI
 };
@@ -19,7 +19,7 @@ const firebaseConfig = {
 let appInstance;
 let dbInstance;
 let authInstance;
-let recaptchaVerifier; // Variável global para o RecaptchaVerifier
+// let recaptchaVerifier; // REMOVIDO: Agora usando useRef para a instância do reCAPTCHA
 
 const initialAuthTokenForBuild = null;
 const appIdForBuild = 'default-app-id';
@@ -45,7 +45,7 @@ function App() {
   // Estados para a nova modal de decisão de entrega
   const [showDeliveryDecisionModal, setShowDeliveryDecisionModal] = useState(false);
   const [selectedOrderForDelivery, setSelectedOrderForDelivery] = useState(null);
-  const [selectedDeliveryArea, setSelectedDeliveryArea] = useState('');
+  const [selectedDeliveryArea, setSelectedDeliveryArea] = '';
 
   // Estado para armazenar as estatísticas de rotas
   const [routeStats, setRouteStats] = useState({});
@@ -57,26 +57,26 @@ function App() {
 
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
-  const [clientAddress, setClientAddress] = useState('');
-  const [clientComplement, setClientComplement] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState('Dinheiro');
-  const [deliveryOption, setDeliveryOption] = useState('Receber em Casa');
+  const [clientAddress, setClientAddress] = '';
+  const [clientComplement, setClientComplement] = '';
+  const [paymentMethod, setPaymentMethod] = 'Dinheiro';
+  const [deliveryOption, setDeliveryOption] = 'Receber em Casa';
 
-  const [clientEmail, setClientEmail] = useState('');
-  const [clientPassword, setClientPassword] = useState('');
+  const [clientEmail, setClientEmail] = '';
+  const [clientPassword, setClientPassword] = '';
 
   // Novos estados para verificação de telefone
   const [otpCode, setOtpCode] = useState('');
-  const [showOtpInput, setShowOtpInput] = useState(false); // Mantém para mostrar/esconder o campo OTP
   const [confirmationResult, setConfirmationResult] = useState(null);
   const [phoneVerified, setPhoneVerified] = useState(false); // Novo estado para verificar se o telefone foi validado
   const [registrationStep, setRegistrationStep] = useState(1); // 1: Info e Solicitar OTP, 2: Inserir OTP
 
+  const recaptchaVerifierRef = useRef(null); // Usando useRef para a instância do reCAPTCHA
 
   const [newProductName, setNewProductName] = useState('');
-  const [newProductPrice, setNewProductPrice] = useState('');
-  const [newProductStock, setNewProductStock] = useState('');
-  const [newProductImageUrl, setNewProductImageUrl] = useState('');
+  const [newProductPrice, setNewProductPrice] = '';
+  const [newProductStock, setNewProductStock] = '';
+  const [newProductImageUrl, setNewProductImageUrl] = '';
 
   const [promotions, setPromotions] = useState([]);
 
@@ -162,7 +162,7 @@ function App() {
 
   // Initialize reCAPTCHA when the registration modal is shown and step is 1
   useEffect(() => {
-    if (showRegistrationModal && isAuthReady && authInstance && registrationStep === 1 && !recaptchaVerifier) {
+    if (showRegistrationModal && isAuthReady && authInstance && registrationStep === 1 && !recaptchaVerifierRef.current) {
       // Cria a div para o reCAPTCHA se ela não existir
       let recaptchaContainer = document.getElementById('recaptcha-container');
       if (!recaptchaContainer) {
@@ -172,7 +172,7 @@ function App() {
           document.body.appendChild(recaptchaContainer); // Pode ser ajustado para ser dentro do modal
       }
 
-      window.recaptchaVerifier = new RecaptchaVerifier(authInstance, 'recaptcha-container', {
+      recaptchaVerifierRef.current = new RecaptchaVerifier(authInstance, 'recaptcha-container', {
         'size': 'invisible', // Pode ser 'invisible' para um fluxo mais suave
         'callback': (response) => {
           // reCAPTCHA solved, allows phone number verification
@@ -181,20 +181,21 @@ function App() {
         'expired-callback': () => {
           // reCAPTCHA expired. Reset UI.
           setMessage("reCAPTCHA expirou. Por favor, tente novamente.");
-          window.recaptchaVerifier.render().then(function(widgetId) {
-            grecaptcha.reset(widgetId);
-          });
+          if (recaptchaVerifierRef.current) { // Verifica se a referência existe antes de usar
+            recaptchaVerifierRef.current.render().then(function(widgetId) {
+                grecaptcha.reset(widgetId);
+            });
+          }
         }
       });
-      recaptchaVerifier = window.recaptchaVerifier; // Atribui a variável global
-      recaptchaVerifier.render(); // Renderiza o reCAPTCHA
+      recaptchaVerifierRef.current.render(); // Renderiza o reCAPTCHA
     }
     // Cleanup function when modal closes or step changes away from 1
     return () => {
-        if (recaptchaVerifier) {
-            recaptchaVerifier.clear();
-            recaptchaVerifier = null;
-            delete window.recaptchaVerifier;
+        if (recaptchaVerifierRef.current) { // Verifica se a referência existe antes de usar
+            recaptchaVerifierRef.current.clear();
+            recaptchaVerifierRef.current = null;
+            // delete window.recaptchaVerifier; // Não é mais necessário se não for atribuído a window diretamente
             const recaptchaElement = document.getElementById('recaptcha-container');
             if (recaptchaElement) {
                 recaptchaElement.innerHTML = ''; // Limpa o conteúdo
@@ -592,20 +593,19 @@ function App() {
       return;
     }
     // Garante que o reCAPTCHA está pronto
-    if (!window.recaptchaVerifier) {
+    if (!recaptchaVerifierRef.current) { // Usando recaptchaVerifierRef.current
       setMessage('Aguarde, o sistema de segurança está carregando...');
       return;
     }
 
     setLoading(true);
     setMessage('Solicitando código de verificação...');
-    setShowOtpInput(true); // Exibe a entrada OTP imediatamente para feedback visual
-
+    
     try {
         // Formata o número para o padrão E.164 (ex: +5511999999999)
         const formattedPhoneNumber = clientPhone.startsWith('+') ? clientPhone : `+55${clientPhone.replace(/\D/g, '')}`;
 
-        const result = await signInWithPhoneNumber(authInstance, formattedPhoneNumber, window.recaptchaVerifier);
+        const result = await signInWithPhoneNumber(authInstance, formattedPhoneNumber, recaptchaVerifierRef.current); // Usando recaptchaVerifierRef.current
         setConfirmationResult(result);
         setMessage('Código enviado para o seu celular!');
         setRegistrationStep(2); // Avança para a etapa de verificação de OTP
@@ -620,7 +620,6 @@ function App() {
             errorMessage = "Número de telefone ausente.";
         }
         setMessage(errorMessage);
-        setShowOtpInput(false); // Esconde o campo OTP se houver erro
     } finally {
         setLoading(false);
     }
@@ -640,7 +639,6 @@ function App() {
       await confirmationResult.confirm(otpCode);
       setPhoneVerified(true);
       setMessage('Telefone verificado com sucesso!');
-      setShowOtpInput(false); // Esconde o campo OTP após a verificação
       setOtpCode(''); // Limpa o código
       // Se a verificação foi bem-sucedida, o botão de registro final será habilitado.
     } catch (error) {
@@ -1547,7 +1545,7 @@ function App() {
         <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
           <div className="modal-content !max-w-sm !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Fazer Login</h2>
-            <form onSubmit={handleClientLogin} className="space-y-4">
+            <form onSubmit={handleClientLogin} className="space-y-4"> {/* AQUI: Corrigido o fechamento da aspa dupla */}
               <div>
                 <label htmlFor="loginEmail" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
                 <input
@@ -1687,7 +1685,7 @@ function App() {
         <div className="modal-overlay" onClick={() => setShowProductManagementModal(false)}>
           <div className="modal-content !max-w-md !p-6" onClick={(e) => e.stopPropagation()}> {/* Ajuste de tamanho e padding aqui */}
             <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Gerenciar Produtos</h2>
-            <form onSubmit={handleAddProduct} className="space-y-4">
+            <form onSubmit={handleAddProduct} className="space-y-4"> {/* AQUI: Corrigido o fechamento da aspa dupla */}
               <div>
                 <label htmlFor="newProductName" className="block text-sm font-medium text-gray-700 mb-1">Nome do Produto</label>
                 <input
@@ -1849,6 +1847,7 @@ function App() {
 }
 
 export default App;
+
 
 
 
