@@ -266,7 +266,7 @@ function App() {
     if (!isAuthReady || !dbInstance || !userId) return;
 
     const ordersCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`);
-    const q = query(ordersRef);
+    const q = query(ordersCollectionRef); // CORRIGIDO: de ordersRef para ordersCollectionRef
 
     const unsubscribeOrders = onSnapshot(q, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({
