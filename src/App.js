@@ -10,7 +10,7 @@ const firebaseConfig = {
   authDomain: "deliveryvitoriaapp.firebaseapp.com", // SEU VALOR AQUI
   projectId: "deliveryvitoriaapp", // SEU VALOR AQUI
   storageBucket: "deliveryvitoriaapp.firebasestorage.app", // SEU VALOR AQUI
-  messagingSenderId: "97567737035", // SEU VALUOR AQUI
+  messagingSenderId: "97567737035", // SEU VALOR AQUI
   appId: "1:97567737035:web:0b509a3c0bb0242474c74e" // SEU VALOR AQUI
 };
 
@@ -31,9 +31,9 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
-  const [showDeliveryFeesModal, setShowDeliveryFeesModal] = useState(false);
+  const [showDeliveryFeesModal, setShowDeliveryFeesModal] = useState(false); // Move to menu
   const [showChatModal, setShowChatModal] = useState(false);
-  const [showProductManagementModal, setShowProductManagementModal] = useState(false);
+  const [showProductManagementModal, setShowProductManagementModal] = useState(false); // Move to menu
   const [chatMessage, setChatMessage] = useState('');
   const [registeredClient, setRegisteredClient] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -405,7 +405,7 @@ function App() {
         setMessage(`Status do pedido #${orderId.substring(0,8)}... atualizado para ${newStatus}`);
       }
     } catch (error) {
-      console.error("Error updating order status:", error);
+      console.error("Erro ao atualizar status do pedido:", error);
       setMessage("Erro ao atualizar status do pedido.");
     }
   };
@@ -566,14 +566,14 @@ function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 p-4 font-sans antialiased flex flex-col items-center w-full">
-      {/* Script e Style removidos daqui, serão colocados no public/index.html */}
+      {/* Script e Style estão no public/index.html */}
 
       {/* Header Section */}
       <header className="w-full bg-gradient-to-br from-red-600 to-red-800 text-white p-6 md:p-8 lg:p-10 rounded-b-3xl shadow-2xl mb-10 text-center relative transition-all duration-300">
         <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold mb-3 tracking-tight">Delivery Vitória</h1>
         <p className="text-lg md:text-xl font-light opacity-90">O seu separador de pedidos inteligente</p>
         
-        {/* Menu de Três Pontinhos */}
+        {/* Menu de Três Pontinhos - Canto Superior Esquerdo */}
         <div className="absolute top-6 left-6 z-50">
             <button
             onClick={() => setShowNavMenu(!showNavMenu)}
@@ -591,39 +591,20 @@ function App() {
                     <button onClick={() => { setCurrentPage('home'); setShowNavMenu(false); }}>Home</button>
                     <button onClick={() => { setCurrentPage('orders'); setShowNavMenu(false); }}>Acompanhamento de Pedidos</button>
                     <button onClick={() => { setCurrentPage('stats'); setShowNavMenu(false); }}>Estatísticas de Rotas</button>
+                    <button onClick={() => { setShowProductManagementModal(true); setShowNavMenu(false); }}>Gerenciar Produtos</button> {/* MOVIDO AQUI */}
+                    <button onClick={() => { setShowDeliveryFeesModal(true); setShowNavMenu(false); }}>Endereços e Taxas</button> {/* MOVIDO AQUI */}
                 </div>
             )}
         </div>
 
-        {/* Botões de Ação no Canto Superior Direito */}
+        {/* Botões de Ação no Canto Superior Direito - Somente Registro do Cliente */}
         <div className="absolute top-6 right-6 flex flex-col space-y-3">
-            <button
-            onClick={() => setShowChatModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
-            title="Falar com a Equipe"
-            >
-            <span className="text-xl">💬</span>
-            </button>
-            <button
-            onClick={() => setShowProductManagementModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
-            title="Gerenciar Produtos"
-            >
-            <span className="text-xl">📦</span>
-            </button>
             <button
             onClick={() => setShowRegistrationModal(true)}
             className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
             title="Registro do Cliente"
             >
             <span className="text-xl">👤</span>
-            </button>
-            <button
-            onClick={() => setShowDeliveryFeesModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
-            title="Endereços e Taxas"
-            >
-            <span className="text-xl">📍</span>
             </button>
         </div>
       </header>
@@ -892,6 +873,14 @@ function App() {
         </div>
       </footer>
 
+      {/* Botão de Chat Flutuante - Canto Inferior Direito */}
+      <button
+        onClick={() => setShowChatModal(true)}
+        className="fixed bottom-4 right-4 bg-blue-600 hover:bg-blue-700 text-white font-bold p-4 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button z-40 focus:outline-none focus:ring-2 focus:ring-blue-300"
+        title="Falar com a Equipe de Atendimento"
+      >
+        <span className="text-2xl">💬</span>
+      </button>
 
       {/* Client Registration Modal */}
       {showRegistrationModal && (
@@ -1260,4 +1249,5 @@ function App() {
 }
 
 export default App;
+
 
