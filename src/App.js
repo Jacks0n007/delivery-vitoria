@@ -200,7 +200,7 @@ function App() {
     }, [isAuthReady, userId]);
 
     return () => unsubscribeOrders();
-  }, [isAuthReady, userId]); // Removi dbInstance daqui.
+  }, [isAuthReady, userId]);
 
 
   // Function to add a product or promotion to the cart or update its quantity
@@ -565,95 +565,8 @@ function App() {
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 p-4 font-sans antialiased flex flex-col items-center w-full"> {/* w-full para cobrir a tela */}
-      <script src="https://cdn.tailwindcss.com"></script>
-      <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-      <style>
-        {`
-        body { font-family: 'Inter', sans-serif; margin: 0; overflow-x: hidden; } /* Remove margin e overflow-x */
-        .scrollable-list {
-            max-height: 400px;
-            overflow-y: auto;
-        }
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background-color: rgba(0, 0, 0, 0.7);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-        }
-        .modal-content {
-            background-color: white;
-            padding: 2.5rem;
-            border-radius: 1.5rem;
-            box-shadow: 0 15px 25px rgba(0, 0, 0, 0.3);
-            max-width: 550px;
-            width: 90%;
-            position: relative;
-            transform: translateY(-20px);
-            animation: modalPopIn 0.3s ease-out forwards;
-        }
-        @keyframes modalPopIn {
-          from { opacity: 0; transform: translateY(-50px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        .promotions-carousel::-webkit-scrollbar {
-          height: 8px;
-        }
-        .promotions-carousel::-webkit-scrollbar-track {
-          background: #f1f1f1;
-          border-radius: 10px;
-        }
-        .promotions-carousel::-webkit-scrollbar-thumb {
-          background: #ef4444;
-          border-radius: 10px;
-        }
-        .promotions-carousel::-webkit-scrollbar-thumb:hover {
-          background: #dc2626;
-        }
-        .glow-button {
-          transition: all 0.3s ease;
-        }
-        .glow-button:hover {
-          box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
-        }
-        .nav-menu {
-          position: absolute;
-          top: 70px; /* Ajuste para ficar abaixo do botão de menu */
-          left: 1rem;
-          background-color: white;
-          border-radius: 0.75rem; /* rounded-xl */
-          box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1); /* shadow-xl */
-          z-index: 999;
-          padding: 0.75rem; /* p-3 */
-          min-width: 180px;
-          animation: fadeIn 0.2s ease-out forwards;
-        }
-        .nav-menu button {
-          display: block;
-          width: 100%;
-          text-align: left;
-          padding: 0.75rem 1rem; /* py-3 px-4 */
-          border-radius: 0.5rem; /* rounded-lg */
-          font-weight: 500; /* font-medium */
-          color: #374151; /* gray-700 */
-          transition: background-color 0.2s, color 0.2s;
-        }
-        .nav-menu button:hover {
-          background-color: #fef2f2; /* red-50 */
-          color: #b91c1c; /* red-700 */
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(-10px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        `}
-      </style>
+    <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 p-4 font-sans antialiased flex flex-col items-center w-full">
+      {/* Script e Style removidos daqui, serão colocados no public/index.html */}
 
       {/* Header Section */}
       <header className="w-full bg-gradient-to-br from-red-600 to-red-800 text-white p-6 md:p-8 lg:p-10 rounded-b-3xl shadow-2xl mb-10 text-center relative transition-all duration-300">
@@ -716,7 +629,7 @@ function App() {
       </header>
 
       {/* Main Content Area - Renderizado condicionalmente */}
-      <main className="w-full p-4 md:p-8 lg:p-10 flex flex-col gap-10"> {/* w-full para cobrir a tela */}
+      <main className="w-full p-4 md:p-8 lg:p-10 flex flex-col gap-10">
         {message && (
             <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded-md shadow-md mb-6 animate-pulse" role="alert">
             <p className="font-bold">Aviso:</p>
@@ -1347,3 +1260,4 @@ function App() {
 }
 
 export default App;
+
