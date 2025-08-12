@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, query, addDoc, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 
 
@@ -31,9 +31,10 @@ function App() {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
   const [showRegistrationModal, setShowRegistrationModal] = useState(false);
-  const [showDeliveryFeesModal, setShowDeliveryFeesModal] = useState(false); // Move to menu
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showDeliveryFeesModal, setShowDeliveryFeesModal] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
-  const [showProductManagementModal, setShowProductManagementModal] = useState(false); // Move to menu
+  const [showProductManagementModal, setShowProductManagementModal] = useState(false);
   const [chatMessage, setChatMessage] = useState('');
   const [registeredClient, setRegisteredClient] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -48,7 +49,7 @@ function App() {
   const [routeStats, setRouteStats] = useState({});
 
   // ESTADOS PARA NAVEGAÇÃO E MENU
-  const [currentPage, setCurrentPage] = useState('home'); // 'home', 'orders', 'stats'
+  const [currentPage, setCurrentPage] = useState('home');
   const [showNavMenu, setShowNavMenu] = useState(false);
 
 
@@ -58,6 +59,10 @@ function App() {
   const [clientComplement, setClientComplement] = useState('');
   const [paymentMethod, setPaymentMethod] = useState('Dinheiro');
   const [deliveryOption, setDeliveryOption] = useState('Receber em Casa');
+
+  const [clientEmail, setClientEmail] = useState(''); // NOVO: Email do cliente para cadastro/login
+  const [clientPassword, setClientPassword] = useState(''); // NOVO: Senha do cliente para cadastro/login
+
 
   const [newProductName, setNewProductName] = useState('');
   const [newProductPrice, setNewProductPrice] = useState('');
@@ -93,7 +98,32 @@ function App() {
       const unsubscribeAuth = onAuthStateChanged(authInstance, async (user) => {
         if (user) {
           setUserId(user.uid);
+          // Tenta buscar as informações do cliente no Firestore
+          const clientDocRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/clients`, user.uid);
+          const clientSnap = await getDoc(clientDocRef);
+          if (clientSnap.exists()) {
+            setRegisteredClient(clientSnap.data());
+            // Preenche os campos do formulário de cadastro com os dados do cliente
+            setClientName(clientSnap.data().name || '');
+            setClientPhone(clientSnap.data().phone || '');
+            setClientAddress(clientSnap.data().address || '');
+            setClientComplement(clientSnap.data().complement || '');
+            setPaymentMethod(clientSnap.data().paymentMethod || 'Dinheiro');
+            setDeliveryOption(clientSnap.data().deliveryOption || 'Receber em Casa');
+            setClientEmail(clientSnap.data().email || ''); // Preenche o email se existir
+          } else {
+            setRegisteredClient(null); // Nenhum cliente cadastrado para este UID
+            // Limpa os campos se não há cliente registrado
+            setClientName('');
+            setClientPhone('');
+            setClientAddress('');
+            setClientComplement('');
+            setPaymentMethod('Dinheiro');
+            setDeliveryOption('Receber em Casa');
+            setClientEmail('');
+          }
         } else {
+          // Se não houver usuário logado (nem com email/senha), tenta logar anonimamente
           try {
             if (initialAuthTokenForBuild) {
               await signInWithCustomToken(authInstance, initialAuthTokenForBuild);
@@ -103,7 +133,8 @@ function App() {
           } catch (error) {
             console.error("Firebase Auth Error during sign-in:", error);
             setMessage("Erro na autenticação. Tente novamente.");
-            setUserId(crypto.randomUUID());
+            setUserId(crypto.randomUUID()); // Fallback: gera um ID de usuário aleatório
+            setRegisteredClient(null);
           }
         }
         setIsAuthReady(true);
@@ -344,38 +375,82 @@ function App() {
     );
   };
 
-  // Function to finalize the current cart as a new order and save to Firestore
-  const finalizeOrder = async () => {
+  // Funcao para INICIAR o checkout (finalizar pedido da tela Home)
+  const initiateCheckout = () => {
     if (cart.length === 0) {
       setMessage('O carrinho está vazio. Adicione produtos antes de finalizar o pedido.');
       return;
     }
-    if (!isAuthReady || !dbInstance || !userId) {
-      setMessage('Sistema não pronto ou usuário não autenticado. Tente novamente.');
+    if (!registeredClient) {
+      setShowRegistrationModal(true);
+      setMessage('Por favor, cadastre suas informações para continuar a finalização do pedido.');
       return;
     }
+    setCurrentPage('checkout');
+    setMessage(''); // Limpa qualquer mensagem anterior
+  };
 
+  // Nova função para REALMENTE finalizar o pedido no Firebase (executada na tela de Checkout)
+  const confirmFinalOrder = async () => {
+    if (!isAuthReady || !dbInstance || !userId || !registeredClient) {
+      setMessage('Sistema não pronto ou informações do cliente ausentes. Tente novamente.');
+      return;
+    }
     setLoading(true);
-    setMessage('Processando pedido...');
+    setMessage('Finalizando seu pedido...');
 
     try {
+      let orderTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+      let finalDeliveryFee = 0;
+      let finalDeliveryOptionName = registeredClient.deliveryOption;
+
+      if (registeredClient.deliveryOption === 'Receber em Casa') {
+        const chosenArea = deliveryAreas.find(area => area.name === registeredClient.deliveryOption || area.id === registeredClient.deliveryOption.toLowerCase().replace(/ /g, '_'));
+        if (chosenArea) {
+          finalDeliveryFee = chosenArea.fee;
+          orderTotal += finalDeliveryFee;
+          finalDeliveryOptionName = chosenArea.name;
+        }
+      }
+
       const newOrderData = {
         items: cart,
-        total: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
+        total: orderTotal,
         status: 'Pendente',
         timestamp: new Date().toLocaleString('pt-BR'),
-        clientInfo: registeredClient,
-        userId: userId,
+        clientInfo: {
+          name: registeredClient.name,
+          phone: registeredClient.phone,
+          address: registeredClient.address,
+          complement: registeredClient.complement,
+          paymentMethod: registeredClient.paymentMethod,
+          deliveryOption: registeredClient.deliveryOption,
+          email: registeredClient.email || null, // Garante que o email seja salvo no pedido se disponível
+        },
+        deliveryFee: finalDeliveryFee,
+        finalDeliveryOption: finalDeliveryOptionName,
+        userId: userId, // Garante que o userId do Firestore seja o UID do auth
       };
 
       await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`), newOrderData);
 
+      if (registeredClient.deliveryOption === 'Receber em Casa') {
+        const chosenArea = deliveryAreas.find(area => area.name === registeredClient.deliveryOption || area.id === registeredClient.deliveryOption.toLowerCase().replace(/ /g, '_'));
+        if (chosenArea) {
+          const routeStatsRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/deliveryRoutesStats`, chosenArea.id);
+          await setDoc(routeStatsRef, { name: chosenArea.name, count: (routeStats[chosenArea.id]?.count || 0) + 1 }, { merge: true });
+        }
+      }
+
+
       setCart([]);
       setLoading(false);
-      setMessage(`Pedido realizado com sucesso!`);
+      setMessage(`Pedido realizado com sucesso! Você pode acompanhar o status em 'Acompanhamento de Pedidos'.`);
+      setCurrentPage('orders');
     } catch (error) {
-      console.error("Error finalizing order:", error);
+      console.error("Erro ao finalizar pedido na tela de checkout:", error);
       setMessage("Erro ao finalizar pedido. Tente novamente.");
+    } finally {
       setLoading(false);
     }
   };
@@ -395,6 +470,8 @@ function App() {
         const orderToDecide = orders.find(order => order.id === orderId);
         if (orderToDecide) {
           setSelectedOrderForDelivery(orderToDecide);
+          const initialDeliveryAreaId = deliveryAreas.find(area => area.name === orderToDecide.finalDeliveryOption)?.id || '';
+          setSelectedDeliveryArea(initialDeliveryAreaId);
           setShowDeliveryDecisionModal(true);
           setMessage(`Pedido #${orderId.substring(0,8)}... pronto para decisão de entrega!`);
         } else {
@@ -410,7 +487,7 @@ function App() {
     }
   };
 
-  // Nova função para registrar a decisão de entrega/retirada do cliente
+  // Nova função para registrar a decisão de entrega/retirada do cliente (pós-separação)
   const handleFinalDeliveryOption = async () => {
     if (!selectedOrderForDelivery || !selectedDeliveryArea || !dbInstance || !userId) {
       setMessage('Erro: Informações de entrega incompletas ou sistema não pronto.');
@@ -426,7 +503,6 @@ function App() {
       const deliveryFee = chosenArea ? chosenArea.fee : 0;
       const finalStatus = chosenArea && chosenArea.id === 'retirar_no_local' ? 'Aguardando Retirada' : 'Em Rota de Entrega';
 
-      // Atualiza o pedido com a opção de entrega e taxa
       await updateDoc(orderDocRef, {
         finalDeliveryOption: chosenArea ? chosenArea.name : 'Não Definido',
         deliveryFee: deliveryFee,
@@ -434,7 +510,6 @@ function App() {
         status: finalStatus
       });
 
-      // Atualiza as estatísticas de rota
       const routeStatsRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/deliveryRoutesStats`, chosenArea.id);
       
       await setDoc(routeStatsRef, { name: chosenArea.name, count: (routeStats[chosenArea.id]?.count || 0) + 1 }, { merge: true });
@@ -455,15 +530,60 @@ function App() {
   // Function to handle client registration form submission and save to Firestore
   const handleClientRegistration = async (e) => {
     e.preventDefault();
-    if (!userId || !dbInstance) {
+    if (!userId || !dbInstance || !authInstance) {
       setMessage('Sistema não pronto ou usuário não autenticado. Tente novamente.');
       return;
+    }
+
+    // Validação: Pelo menos um entre email ou telefone, e nome e endereço são obrigatórios.
+    if (!clientName || !clientAddress || (!clientEmail && !clientPhone)) {
+        setMessage('Por favor, preencha Nome, Endereço e pelo menos um entre Email ou Telefone.');
+        return;
+    }
+
+    // Validação da senha: só é obrigatória se um email for fornecido para login seguro
+    const wantsSecureLogin = !!clientEmail; // True se email for fornecido
+    if (wantsSecureLogin && (!clientPassword || clientPassword.length < 6)) {
+        setMessage('Para criar uma conta segura com email, a senha é obrigatória e deve ter no mínimo 6 caracteres.');
+        return;
     }
 
     setLoading(true);
     setMessage('Registrando cliente...');
 
     try {
+      let finalUserId = userId; // Começa com o userId atual (pode ser anônimo)
+
+      if (wantsSecureLogin) { // Se o usuário quer um login seguro com email/senha
+          try {
+              // Tenta criar usuário com email/senha. Se o email já estiver em uso, vai para o catch.
+              // Se o usuário atual for anônimo, o Firebase tenta vincular.
+              const userCredential = await createUserWithEmailAndPassword(authInstance, clientEmail, clientPassword);
+              finalUserId = userCredential.user.uid; // Atualiza para o novo UID (ou o UID do usuário vinculado)
+          } catch (error) {
+              if (error.code === 'auth/email-already-in-use') {
+                  // Se o email já está em uso, informa e sugere login.
+                  setMessage('Este email já está cadastrado. Por favor, faça login ou use outro email.');
+                  setLoading(false);
+                  return;
+              } else {
+                  console.error("Erro ao criar usuário com email/senha:", error);
+                  setMessage(`Erro ao criar conta: ${error.message}.`);
+                  setLoading(false);
+                  return;
+              }
+          }
+      } else {
+          // Se não quer login seguro (apenas cadastro de dados de contato), mantém o userId atual (anônimo ou existente)
+          // Mas garante que o usuário anônimo está logado
+          if (!authInstance.currentUser) {
+              await signInAnonymously(authInstance);
+              finalUserId = authInstance.currentUser.uid;
+          }
+      }
+
+      // Salva/atualiza as informações do cliente no Firestore usando o UID final
+      const clientDocRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/clients`, finalUserId);
       const newClientData = {
         name: clientName,
         phone: clientPhone,
@@ -471,27 +591,100 @@ function App() {
         complement: clientComplement,
         paymentMethod: paymentMethod,
         deliveryOption: deliveryOption,
-        userId: userId,
+        email: clientEmail || null, // Salva o email se fornecido
+        userId: finalUserId,
         timestamp: new Date().toLocaleString('pt-BR')
       };
-      await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/public/data/clients`), newClientData);
+      await setDoc(clientDocRef, newClientData, { merge: true }); // Usar setDoc com merge para criar/atualizar
 
       setRegisteredClient(newClientData);
       setMessage('Cadastro realizado com sucesso!');
       setShowRegistrationModal(false);
-      setClientName('');
-      setClientPhone('');
-      setClientAddress('');
-      setClientComplement('');
-      setPaymentMethod('Dinheiro');
-      setDeliveryOption('Receber em Casa');
+      setClientPassword(''); // Limpa a senha por segurança
+
+      if (currentPage !== 'home' && currentPage !== 'checkout') {
+          setCurrentPage('home'); // Redireciona para home após cadastro
+      } else if (currentPage === 'checkout') {
+          // Se o usuário veio do checkout e se cadastrou, tenta finalizar o pedido
+          setMessage("Informações de cadastro atualizadas. Agora você pode confirmar seu pedido.");
+          // O usuário permanecerá na tela de checkout para confirmar
+      }
+
     } catch (error) {
       console.error("Error registering client:", error);
-      setMessage("Erro ao registrar cliente. Tente novamente.");
+      let errorMessage = "Erro ao registrar cliente. Tente novamente.";
+      if (error.code === 'auth/invalid-email') {
+          errorMessage = "Email inválido.";
+      } else if (error.code === 'auth/weak-password') {
+          errorMessage = "Senha muito fraca (mínimo 6 caracteres).";
+      }
+      setMessage(errorMessage);
     } finally {
       setLoading(false);
     }
   };
+
+  // NOVO: Função para lidar com o login de cliente existente
+  const handleClientLogin = async (e) => {
+    e.preventDefault();
+    if (!authInstance) {
+        setMessage('Sistema de autenticação não disponível. Tente novamente.');
+        return;
+    }
+    if (!clientEmail || !clientPassword) {
+        setMessage('Por favor, preencha email e senha.');
+        return;
+    }
+
+    setLoading(true);
+    setMessage('Fazendo login...');
+
+    try {
+        await signInWithEmailAndPassword(authInstance, clientEmail, clientPassword);
+        setMessage('Login realizado com sucesso!');
+        setShowLoginModal(false);
+        setClientPassword(''); // Limpa a senha
+        // onAuthStateChanged já cuidará de buscar o registeredClient e definir o userId
+        // Redireciona para home ou mantém na tela de checkout se aplicável
+        if (currentPage === 'checkout' && cart.length > 0) {
+            setCurrentPage('checkout');
+        } else {
+            setCurrentPage('home');
+        }
+    } catch (error) {
+        console.error("Erro no login:", error);
+        let errorMessage = "Erro ao fazer login. Verifique seu email e senha.";
+        if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+            errorMessage = "Email ou senha incorretos.";
+        } else if (error.code === 'auth/invalid-email') {
+            errorMessage = "Email inválido.";
+        }
+        setMessage(errorMessage);
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  // NOVO: Função para fazer logout
+  const handleLogout = async () => {
+    if (!authInstance) {
+        setMessage('Sistema de autenticação não disponível.');
+        return;
+    }
+    try {
+        await signOut(authInstance);
+        setRegisteredClient(null); // Limpa o cliente registrado
+        setCart([]); // Limpa o carrinho ao deslogar
+        setClientEmail('');
+        setClientPassword('');
+        setMessage('Você saiu da sua conta.');
+        setCurrentPage('home'); // Redireciona para a home
+    } catch (error) {
+        console.error("Erro ao fazer logout:", error);
+        setMessage("Erro ao sair da conta. Tente novamente.");
+    }
+  };
+
 
   // Function to handle adding a new product to Firestore
   const handleAddProduct = async (e) => {
@@ -591,21 +784,35 @@ function App() {
                     <button onClick={() => { setCurrentPage('home'); setShowNavMenu(false); }}>Home</button>
                     <button onClick={() => { setCurrentPage('orders'); setShowNavMenu(false); }}>Acompanhamento de Pedidos</button>
                     <button onClick={() => { setCurrentPage('stats'); setShowNavMenu(false); }}>Estatísticas de Rotas</button>
-                    <button onClick={() => { setShowProductManagementModal(true); setShowNavMenu(false); }}>Gerenciar Produtos</button> {/* MOVIDO AQUI */}
-                    <button onClick={() => { setShowDeliveryFeesModal(true); setShowNavMenu(false); }}>Endereços e Taxas</button> {/* MOVIDO AQUI */}
+                    <button onClick={() => { setShowProductManagementModal(true); setShowNavMenu(false); }}>Gerenciar Produtos</button>
+                    <button onClick={() => { setShowDeliveryFeesModal(true); setShowNavMenu(false); }}>Endereços e Taxas</button>
+                    <button onClick={() => { setShowRegistrationModal(true); setShowNavMenu(false); }}>Meu Cadastro</button>
+                    {/* Botão de Login/Logout condicional */}
+                    {authInstance && authInstance.currentUser && !authInstance.currentUser.isAnonymous ? (
+                        <button onClick={() => { handleLogout(); setShowNavMenu(false); }}>Sair da Conta</button>
+                    ) : (
+                        <button onClick={() => { setShowLoginModal(true); setShowNavMenu(false); }}>Login</button>
+                    )}
                 </div>
             )}
         </div>
 
-        {/* Botões de Ação no Canto Superior Direito - Somente Registro do Cliente */}
+        {/* Informações do Cliente no Canto Superior Direito */}
         <div className="absolute top-6 right-6 flex flex-col space-y-3">
-            <button
-            onClick={() => setShowRegistrationModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
-            title="Registro do Cliente"
-            >
-            <span className="text-xl">👤</span>
-            </button>
+            {registeredClient ? (
+                <div className="bg-white text-red-700 font-bold py-2 px-4 rounded-full shadow-lg text-sm flex items-center gap-2">
+                    <span className="text-xl">👤</span> {registeredClient.name.split(' ')[0]}
+                    {registeredClient.email && <span className="text-xs font-normal">({registeredClient.email})</span>}
+                </div>
+            ) : ( // Se não está registrado, mostra o botão de cadastro
+                <button
+                onClick={() => setShowRegistrationModal(true)}
+                className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
+                title="Registro do Cliente"
+                >
+                <span className="text-xl">👤</span>
+                </button>
+            )}
         </div>
       </header>
 
@@ -710,21 +917,22 @@ function App() {
                   ))}
                   <div className="text-right mt-6 pt-6 border-t-2 border-red-300">
                     <p className="text-2xl font-bold text-gray-800 mb-3">
-                      Total: R$ {cart.reduce((sum, item) => item.price * item.quantity, 0).toFixed(2)}
+                      Total: R$ {cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
                     </p>
                     {registeredClient && (
                       <div className="text-left bg-red-100 p-4 rounded-lg mb-4 text-base text-red-900 shadow-inner">
                         <p><span className="font-semibold">Cliente Selecionado:</span> {registeredClient.name}</p>
                         <p><span className="font-semibold">Entrega:</span> {registeredClient.deliveryOption}</p>
+                        {registeredClient.email && <p><span className="font-semibold">Email:</span> {registeredClient.email}</p>}
                       </div>
                     )}
                     <button
-                      onClick={finalizeOrder}
+                      onClick={initiateCheckout}
                       disabled={loading || cart.length === 0}
                       className={`mt-4 px-8 py-3 rounded-full text-white font-bold text-xl shadow-xl transition-all duration-300 glow-button
                         ${loading || cart.length === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 transform hover:scale-105'}`}
                     >
-                      {loading ? 'Finalizando...' : 'Finalizar Pedido'}
+                      {loading ? 'Processando...' : 'Finalizar Pedido'}
                     </button>
                     {message && (
                       <p className="mt-3 text-sm font-semibold text-red-700 animate-pulse">{message}</p>
@@ -771,6 +979,7 @@ function App() {
                             <p><span className="font-semibold">Endereço:</span> {order.clientInfo.address}{order.clientInfo.complement && `, ${order.clientInfo.complement}`}</p>
                             <p><span className="font-semibold">Pagamento:</span> {order.clientInfo.paymentMethod}</p>
                             <p><span className="font-semibold">Entrega Preferida:</span> {order.clientInfo.deliveryOption}</p>
+                            {order.clientInfo.email && <p><span className="font-semibold">Email:</span> {order.clientInfo.email}</p>}
                         </div>
                         )}
                     </div>
@@ -837,6 +1046,101 @@ function App() {
             )}
             </section>
         )}
+
+        {/* Checkout Page - Nova tela de finalização de pedido */}
+        {currentPage === 'checkout' && (
+          <section className="w-full bg-white p-6 rounded-3xl shadow-2xl border border-gray-200">
+            <h2 className="text-3xl font-bold text-gray-800 mb-6 pb-3 border-b-4 border-red-400 text-center">Finalizar Pedido</h2>
+            {registeredClient ? (
+              <div className="space-y-6">
+                <h3 className="text-2xl font-semibold text-gray-900 mb-4">Seus Dados de Entrega e Pagamento</h3>
+                <div className="bg-red-50 p-6 rounded-lg shadow-inner text-gray-800 border border-red-200">
+                  <p className="text-lg mb-2"><span className="font-bold">Nome:</span> {registeredClient.name}</p>
+                  <p className="text-lg mb-2"><span className="font-bold">Telefone:</span> {registeredClient.phone}</p>
+                  <p className="text-lg mb-2"><span className="font-bold">Endereço:</span> {registeredClient.address}, {registeredClient.complement}</p>
+                  <p className="text-lg mb-2"><span className="font-bold">Forma de Pagamento:</span> {registeredClient.paymentMethod}</p>
+                  <p className="text-lg"><span className="font-bold">Opção de Entrega:</span> {registeredClient.deliveryOption}</p>
+                  {registeredClient.email && <p className="text-lg"><span className="font-bold">Email:</span> {registeredClient.email}</p>}
+                  {registeredClient.deliveryOption === 'Receber em Casa' && (
+                      <p className="text-base text-red-700 mt-2">
+                          Taxa de Entrega Estimada: R$ {
+                              (deliveryAreas.find(area => area.name === registeredClient.deliveryOption || area.id === registeredClient.deliveryOption.toLowerCase().replace(/ /g, '_'))?.fee || 0).toFixed(2)
+                          }
+                      </p>
+                  )}
+                  <button
+                    onClick={() => setShowRegistrationModal(true)}
+                    className="mt-4 bg-red-600 hover:bg-red-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                  >
+                    Editar Cadastro
+                  </button>
+                </div>
+
+                <h3 className="text-2xl font-semibold text-gray-900 mt-8 mb-4">Resumo do Pedido</h3>
+                <div className="scrollable-list pr-2 bg-gray-50 p-6 rounded-lg shadow-inner border border-gray-200">
+                  {cart.map((item) => (
+                    <div key={item.id} className="flex justify-between items-center py-3 border-b border-gray-200 last:border-b-0">
+                      <div className="flex items-center">
+                          <img src={item.imageUrl} alt={item.name} className="w-16 h-16 rounded-md object-cover mr-4 shadow-sm" />
+                          <div>
+                              <p className="font-semibold text-gray-800 text-lg">{item.name}</p>
+                              <p className="text-sm text-gray-600">Obs: {item.note || 'Nenhuma'}</p>
+                          </div>
+                      </div>
+                      <p className="text-gray-700 text-lg">{item.quantity} x R$ {item.price.toFixed(2)} = <span className="font-bold">R$ {(item.quantity * item.price).toFixed(2)}</span></p>
+                    </div>
+                  ))}
+                </div>
+                <div className="text-right mt-6 text-xl font-bold text-gray-800 border-t-2 border-red-300 pt-6">
+                  Total do Pedido (Produtos): R$ {cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
+                  {registeredClient.deliveryOption === 'Receber em Casa' && (
+                      <p className="text-lg text-red-700 mt-1">
+                          Taxa de Entrega: R$ {
+                              (deliveryAreas.find(area => area.name === registeredClient.deliveryOption || area.id === registeredClient.deliveryOption.toLowerCase().replace(/ /g, '_'))?.fee || 0).toFixed(2)
+                          }
+                      </p>
+                  )}
+                  <p className="text-3xl text-green-700 mt-3">
+                      Total a Pagar: R$ {
+                          (cart.reduce((sum, item) => sum + item.price * item.quantity, 0) + 
+                           (registeredClient.deliveryOption === 'Receber em Casa' ? 
+                             (deliveryAreas.find(area => area.name === registeredClient.deliveryOption || area.id === registeredClient.deliveryOption.toLowerCase().replace(/ /g, '_'))?.fee || 0) : 0)
+                          ).toFixed(2)
+                      }
+                  </p>
+                </div>
+
+                <div className="flex justify-end space-x-4 mt-8">
+                  <button
+                    type="button"
+                    onClick={() => setCurrentPage('home')}
+                    className="px-8 py-3 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold transition-colors shadow-md text-xl"
+                  >
+                    Voltar ao Carrinho
+                  </button>
+                  <button
+                    type="button"
+                    onClick={confirmFinalOrder}
+                    disabled={loading}
+                    className={`px-8 py-3 rounded-full text-white font-bold text-xl shadow-lg transition-all duration-300 glow-button
+                      ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 transform hover:scale-105'}`}
+                  >
+                    {loading ? 'Confirmando...' : 'Confirmar Pedido'}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <p className="text-red-600 text-lg text-center p-4 bg-red-100 rounded-lg border border-red-300">
+                Para finalizar seu pedido, precisamos das suas informações de cadastro. <br/>
+                Por favor, clique em **"Cadastrar Agora"** ou **"Fazer Login"** para continuar.
+                <div className="flex justify-center gap-4 mt-4">
+                  <button onClick={() => setShowRegistrationModal(true)} className="text-blue-700 hover:underline font-bold py-2 px-4 bg-white rounded-full shadow-md">Cadastrar Agora</button>
+                  <button onClick={() => setShowLoginModal(true)} className="text-blue-700 hover:underline font-bold py-2 px-4 bg-white rounded-full shadow-md">Fazer Login</button>
+                </div>
+              </p>
+            )}
+          </section>
+        )}
       </main>
 
       {/* Promotions Footer Section - GLOBAL */}
@@ -886,7 +1190,7 @@ function App() {
       {showRegistrationModal && (
         <div className="modal-overlay" onClick={() => setShowRegistrationModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Cadastro do Cliente</h2>
+            <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">{registeredClient ? 'Editar Cadastro' : 'Novo Cadastro de Cliente'}</h2>
             <form onSubmit={handleClientRegistration} className="space-y-4">
               <div>
                 <label htmlFor="clientName" className="block text-sm font-medium text-gray-700 mb-1">Nome Completo</label>
@@ -899,17 +1203,51 @@ function App() {
                   required
                 />
               </div>
+              
+              {/* Campos de Email e Senha */}
+              <p className="text-sm text-gray-600 italic">
+                  Para criar uma conta segura com senha e ter acesso salvo aos seus pedidos, um **email** é necessário. Você também pode cadastrar apenas com telefone para contato.
+              </p>
               <div>
-                <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">Número de Celular</label>
+                <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">Email (Opcional, para login seguro)</label>
+                <input
+                  type="email"
+                  id="clientEmail"
+                  value={clientEmail}
+                  onChange={(e) => setClientEmail(e.target.value)}
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                  placeholder="seu.email@exemplo.com"
+                  disabled={authInstance && authInstance.currentUser && !authInstance.currentUser.isAnonymous && registeredClient?.email} // Desabilita se já logado com email
+                />
+              </div>
+              <div>
+                <label htmlFor="clientPassword" className="block text-sm font-medium text-gray-700 mb-1">Senha (Mínimo 6 caracteres, se usar email)</label>
+                <input
+                  type="password"
+                  id="clientPassword"
+                  value={clientPassword}
+                  onChange={(e) => setClientPassword(e.target.value)}
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                  placeholder="••••••••"
+                  required={!!clientEmail && (!registeredClient || !authInstance.currentUser || authInstance.currentUser.isAnonymous)} // Requer senha se email fornecido e não está logado ou é anônimo
+                />
+              </div>
+
+              {/* Campo de Telefone (Obrigatório para contato) */}
+              <div>
+                <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">Número de Celular (Obrigatório para contato)</label>
                 <input
                   type="tel"
                   id="clientPhone"
                   value={clientPhone}
                   onChange={(e) => setClientPhone(e.target.value)}
                   className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                  placeholder="(XX) XXXXX-XXXX"
                   required
                 />
               </div>
+              
+              {/* Campos de Endereço, Pagamento, Entrega */}
               <div>
                 <label htmlFor="clientAddress" className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
                 <input
@@ -987,15 +1325,83 @@ function App() {
                   className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
                     ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
                 >
-                  {loading ? 'Registrando...' : 'Registrar'}
+                  {loading ? 'Registrando...' : (registeredClient ? 'Atualizar Cadastro' : 'Registrar')}
                 </button>
               </div>
               {message && (
                 <p className="mt-3 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
               )}
+              {(!registeredClient || authInstance?.currentUser?.isAnonymous) && ( // Mostra link para login se não registrado ou anônimo
+                <div className="text-center mt-4">
+                    <p className="text-gray-600">Já tem conta? <button type="button" onClick={() => {setShowRegistrationModal(false); setShowLoginModal(true);}} className="text-blue-700 hover:underline font-bold">Faça login</button></p>
+                </div>
+              )}
             </form>
             <button
               onClick={() => setShowRegistrationModal(false)}
+              className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-3xl"
+              aria-label="Fechar"
+            >
+              &times;
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Login Modal */}
+      {showLoginModal && (
+        <div className="modal-overlay" onClick={() => setShowLoginModal(false)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-3xl font-bold text-red-800 mb-6 text-center">Fazer Login</h2>
+            <form onSubmit={handleClientLogin} className="space-y-4">
+              <div>
+                <label htmlFor="loginEmail" className="block text-sm font-medium text-gray-700 mb-1">Email</label>
+                <input
+                  type="email"
+                  id="loginEmail"
+                  value={clientEmail}
+                  onChange={(e) => setClientEmail(e.target.value)}
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                  required
+                />
+              </div>
+              <div>
+                <label htmlFor="loginPassword" className="block text-sm font-medium text-gray-700 mb-1">Senha</label>
+                <input
+                  type="password"
+                  id="loginPassword"
+                  value={clientPassword}
+                  onChange={(e) => setClientPassword(e.target.value)}
+                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                  required
+                />
+              </div>
+              <div className="flex justify-end space-x-4 mt-6">
+                <button
+                  type="button"
+                  onClick={() => setShowLoginModal(false)}
+                  className="px-6 py-2.5 rounded-full border border-gray-300 text-gray-700 hover:bg-gray-100 font-bold transition-colors shadow-md"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
+                    ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
+                >
+                  {loading ? 'Entrando...' : 'Entrar'}
+                </button>
+              </div>
+              {message && (
+                <p className="mt-3 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
+              )}
+              <div className="text-center mt-4">
+                  <p className="text-gray-600">Não tem conta? <button type="button" onClick={() => {setShowLoginModal(false); setShowRegistrationModal(true);}} className="text-blue-700 hover:underline font-bold">Cadastre-se</button></p>
+              </div>
+            </form>
+            <button
+              onClick={() => setShowLoginModal(false)}
               className="absolute top-4 right-4 text-gray-500 hover:text-gray-800 text-3xl"
               aria-label="Fechar"
             >
