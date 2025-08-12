@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut } from 'firebase/auth';
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth'; // Adicionados: RecaptchaVerifier, signInWithPhoneNumber
 import { getFirestore, collection, onSnapshot, query, addDoc, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 
 
@@ -9,7 +9,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyDa90bifuUXRgGyS30Y-P9Q6NhOnLyn21s", // SEU VALOR AQUI
   authDomain: "deliveryvitoriaapp.firebaseapp.com", // SEU VALOR AQUI
   projectId: "deliveryvitoriaapp", // SEU VALOR AQUI
-  storageBucket: "deliveryvitoriaapp.firebasestorage.app", // SEU VALOR AQUI
+  storageBucket: "deliveryvitoriaapp.firebaseystorage.app", // SEU VALOR AQUI
   messagingSenderId: "97567737035", // SEU VALOR AQUI
   appId: "1:97567737035:web:0b509a3c0bb0242474c74e" // SEU VALOR AQUI
 };
@@ -18,6 +18,7 @@ const firebaseConfig = {
 let appInstance;
 let dbInstance;
 let authInstance;
+let recaptchaVerifier; // Variável global para o RecaptchaVerifier
 
 const initialAuthTokenForBuild = null;
 const appIdForBuild = 'default-app-id';
@@ -34,7 +35,7 @@ function App() {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showDeliveryFeesModal, setShowDeliveryFeesModal] = useState(false);
   const [showChatModal, setShowChatModal] = useState(false);
-  const [showProductManagementModal, setShowProductManagementModal] = useState(false);
+  const [showProductManagementModal, setShowProductManagementModal] = useState(false); // Manter para a função interna de gerenciar
   const [chatMessage, setChatMessage] = useState('');
   const [registeredClient, setRegisteredClient] = useState(null);
   const [userId, setUserId] = useState(null);
@@ -60,8 +61,14 @@ function App() {
   const [paymentMethod, setPaymentMethod] = useState('Dinheiro');
   const [deliveryOption, setDeliveryOption] = useState('Receber em Casa');
 
-  const [clientEmail, setClientEmail] = useState(''); // NOVO: Email do cliente para cadastro/login
-  const [clientPassword, setClientPassword] = useState(''); // NOVO: Senha do cliente para cadastro/login
+  const [clientEmail, setClientEmail] = useState('');
+  const [clientPassword, setClientPassword] = useState('');
+
+  // Novos estados para verificação de telefone
+  const [otpCode, setOtpCode] = useState('');
+  const [showOtpInput, setShowOtpInput] = useState(false);
+  const [confirmationResult, setConfirmationResult] = useState(null);
+  const [phoneVerified, setPhoneVerified] = useState(false); // Novo estado para verificar se o telefone foi validado
 
 
   const [newProductName, setNewProductName] = useState('');
@@ -110,7 +117,8 @@ function App() {
             setClientComplement(clientSnap.data().complement || '');
             setPaymentMethod(clientSnap.data().paymentMethod || 'Dinheiro');
             setDeliveryOption(clientSnap.data().deliveryOption || 'Receber em Casa');
-            setClientEmail(clientSnap.data().email || ''); // Preenche o email se existir
+            setClientEmail(user.email || ''); // Preenche o email do auth se existir
+            setPhoneVerified(!!clientSnap.data().phoneVerified); // Define o status de verificação do telefone
           } else {
             setRegisteredClient(null); // Nenhum cliente cadastrado para este UID
             // Limpa os campos se não há cliente registrado
@@ -121,6 +129,7 @@ function App() {
             setPaymentMethod('Dinheiro');
             setDeliveryOption('Receber em Casa');
             setClientEmail('');
+            setPhoneVerified(false);
           }
         } else {
           // Se não houver usuário logado (nem com email/senha), tenta logar anonimamente
@@ -135,6 +144,7 @@ function App() {
             setMessage("Erro na autenticação. Tente novamente.");
             setUserId(crypto.randomUUID()); // Fallback: gera um ID de usuário aleatório
             setRegisteredClient(null);
+            setPhoneVerified(false);
           }
         }
         setIsAuthReady(true);
@@ -147,6 +157,42 @@ function App() {
       setIsAuthReady(true);
     }
   }, []);
+
+  // Initialize reCAPTCHA when the registration modal is shown
+  useEffect(() => {
+    if (showRegistrationModal && isAuthReady && authInstance && !recaptchaVerifier) {
+      window.recaptchaVerifier = new RecaptchaVerifier(authInstance, 'recaptcha-container', {
+        'size': 'invisible', // Pode ser 'invisible' para um fluxo mais suave
+        'callback': (response) => {
+          // reCAPTCHA solved, allows phone number verification
+          console.log("reCAPTCHA solved:", response);
+        },
+        'expired-callback': () => {
+          // reCAPTCHA expired. Reset UI.
+          setMessage("reCAPTCHA expirou. Por favor, tente novamente.");
+          window.recaptchaVerifier.render().then(function(widgetId) {
+            grecaptcha.reset(widgetId);
+          });
+        }
+      });
+      recaptchaVerifier = window.recaptchaVerifier; // Atribui a variável global
+      recaptchaVerifier.render(); // Renderiza o reCAPTCHA
+    }
+    // Cleanup function when modal closes
+    return () => {
+        if (recaptchaVerifier) {
+            recaptchaVerifier.clear();
+            recaptchaVerifier = null;
+            delete window.recaptchaVerifier;
+            // Limpar reCAPTCHA da DOM se for um elemento visível e não badge
+            const recaptchaElement = document.getElementById('recaptcha-container');
+            if (recaptchaElement && recaptchaElement.hasChildNodes()) {
+                recaptchaElement.innerHTML = '';
+            }
+        }
+    };
+  }, [showRegistrationModal, isAuthReady]);
+
 
   // Fetch products from Firestore
   useEffect(() => {
@@ -381,9 +427,9 @@ function App() {
       setMessage('O carrinho está vazio. Adicione produtos antes de finalizar o pedido.');
       return;
     }
-    if (!registeredClient) {
+    if (!registeredClient || !phoneVerified) { // Adicionado verificação de telefone
       setShowRegistrationModal(true);
-      setMessage('Por favor, cadastre suas informações para continuar a finalização do pedido.');
+      setMessage('Por favor, cadastre suas informações e valide seu telefone para continuar a finalização do pedido.');
       return;
     }
     setCurrentPage('checkout');
@@ -392,8 +438,8 @@ function App() {
 
   // Nova função para REALMENTE finalizar o pedido no Firebase (executada na tela de Checkout)
   const confirmFinalOrder = async () => {
-    if (!isAuthReady || !dbInstance || !userId || !registeredClient) {
-      setMessage('Sistema não pronto ou informações do cliente ausentes. Tente novamente.');
+    if (!isAuthReady || !dbInstance || !userId || !registeredClient || !phoneVerified) { // Adicionado verificação de telefone
+      setMessage('Sistema não pronto, informações do cliente ausentes ou telefone não validado. Tente novamente.');
       return;
     }
     setLoading(true);
@@ -425,11 +471,11 @@ function App() {
           complement: registeredClient.complement,
           paymentMethod: registeredClient.paymentMethod,
           deliveryOption: registeredClient.deliveryOption,
-          email: registeredClient.email || null, // Garante que o email seja salvo no pedido se disponível
+          email: registeredClient.email || null,
         },
         deliveryFee: finalDeliveryFee,
         finalDeliveryOption: finalDeliveryOptionName,
-        userId: userId, // Garante que o userId do Firestore seja o UID do auth
+        userId: userId,
       };
 
       await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`), newOrderData);
@@ -526,6 +572,73 @@ function App() {
     }
   };
 
+  // NOVO: Função para solicitar o código OTP
+  const handleRequestOtp = async () => {
+    if (!clientPhone || !authInstance) {
+      setMessage('Por favor, digite um número de celular válido para solicitar o código.');
+      return;
+    }
+
+    setLoading(true);
+    setMessage('Solicitando código de verificação...');
+    setShowOtpInput(false); // Esconde a entrada OTP enquanto solicita um novo
+
+    try {
+        // Formata o número para o padrão E.164 (ex: +5511999999999)
+        const formattedPhoneNumber = clientPhone.startsWith('+') ? clientPhone : `+55${clientPhone.replace(/\D/g, '')}`;
+
+        const result = await signInWithPhoneNumber(authInstance, formattedPhoneNumber, window.recaptchaVerifier);
+        setConfirmationResult(result);
+        setShowOtpInput(true);
+        setMessage('Código enviado para o seu celular!');
+    } catch (error) {
+        console.error("Erro ao solicitar OTP:", error);
+        let errorMessage = "Erro ao solicitar código. Tente novamente.";
+        if (error.code === 'auth/too-many-requests') {
+            errorMessage = "Muitas tentativas. Tente novamente mais tarde.";
+        } else if (error.code === 'auth/invalid-phone-number') {
+            errorMessage = "Número de telefone inválido.";
+        }
+        setMessage(errorMessage);
+        setShowOtpInput(false); // Esconde o campo OTP se houver erro
+    } finally {
+        setLoading(false);
+    }
+  };
+
+  // NOVO: Função para verificar o código OTP
+  const handleVerifyOtp = async () => {
+    if (!otpCode || !confirmationResult) {
+      setMessage('Por favor, digite o código de verificação.');
+      return;
+    }
+
+    setLoading(true);
+    setMessage('Verificando código...');
+
+    try {
+      await confirmationResult.confirm(otpCode);
+      setPhoneVerified(true);
+      setMessage('Telefone verificado com sucesso!');
+      setShowOtpInput(false); // Esconde o campo OTP após a verificação
+      setOtpCode(''); // Limpa o código
+      // Se o usuário está cadastrando, permite finalizar o cadastro
+      // Se o usuário está logando, isso já foi tratado pelo onAuthStateChanged
+    } catch (error) {
+      console.error("Erro ao verificar OTP:", error);
+      let errorMessage = "Código inválido ou expirado. Tente novamente.";
+      if (error.code === 'auth/invalid-verification-code') {
+          errorMessage = "Código de verificação inválido.";
+      } else if (error.code === 'auth/code-expired') {
+          errorMessage = "Código expirado. Solicite um novo.";
+      }
+      setMessage(errorMessage);
+      setPhoneVerified(false);
+    } finally {
+      setLoading(false);
+    }
+  };
+
 
   // Function to handle client registration form submission and save to Firestore
   const handleClientRegistration = async (e) => {
@@ -535,16 +648,14 @@ function App() {
       return;
     }
 
-    // Validação: Pelo menos um entre email ou telefone, e nome e endereço são obrigatórios.
-    if (!clientName || !clientAddress || (!clientEmail && !clientPhone)) {
-        setMessage('Por favor, preencha Nome, Endereço e pelo menos um entre Email ou Telefone.');
+    // TODOS os campos se tornam obrigatórios para a REGISTRO COMPLETO
+    if (!clientName || !clientPhone || !clientEmail || !clientPassword || clientPassword.length < 6 || !clientAddress) {
+        setMessage('Por favor, preencha todos os campos obrigatórios (Nome, Celular, Email, Senha, Endereço). A senha deve ter no mínimo 6 caracteres.');
         return;
     }
-
-    // Validação da senha: só é obrigatória se um email for fornecido para login seguro
-    const wantsSecureLogin = !!clientEmail; // True se email for fornecido
-    if (wantsSecureLogin && (!clientPassword || clientPassword.length < 6)) {
-        setMessage('Para criar uma conta segura com email, a senha é obrigatória e deve ter no mínimo 6 caracteres.');
+    
+    if (!phoneVerified) { // Adicionado verificação de telefone
+        setMessage('Por favor, valide seu número de celular com o código enviado antes de registrar.');
         return;
     }
 
@@ -554,31 +665,30 @@ function App() {
     try {
       let finalUserId = userId; // Começa com o userId atual (pode ser anônimo)
 
-      if (wantsSecureLogin) { // Se o usuário quer um login seguro com email/senha
-          try {
-              // Tenta criar usuário com email/senha. Se o email já estiver em uso, vai para o catch.
-              // Se o usuário atual for anônimo, o Firebase tenta vincular.
-              const userCredential = await createUserWithEmailAndPassword(authInstance, clientEmail, clientPassword);
-              finalUserId = userCredential.user.uid; // Atualiza para o novo UID (ou o UID do usuário vinculado)
-          } catch (error) {
-              if (error.code === 'auth/email-already-in-use') {
-                  // Se o email já está em uso, informa e sugere login.
-                  setMessage('Este email já está cadastrado. Por favor, faça login ou use outro email.');
-                  setLoading(false);
-                  return;
-              } else {
-                  console.error("Erro ao criar usuário com email/senha:", error);
-                  setMessage(`Erro ao criar conta: ${error.message}.`);
+      // Tenta criar ou logar com email/senha (Firebase Auth)
+      try {
+          // Verifica se já existe um usuário com este email
+          const userCredential = await signInWithEmailAndPassword(authInstance, clientEmail, clientPassword);
+          finalUserId = userCredential.user.uid;
+      } catch (signInError) {
+          if (signInError.code === 'auth/user-not-found' || signInError.code === 'auth/wrong-password') {
+              // Se não encontrou o usuário ou senha errada, tenta criar um novo
+              try {
+                  const userCredential = await createUserWithEmailAndPassword(authInstance, clientEmail, clientPassword);
+                  finalUserId = userCredential.user.uid;
+              } catch (createError) {
+                  if (createError.code === 'auth/email-already-in-use') {
+                      setMessage('Este email já está cadastrado. Por favor, faça login ou use outro email.');
+                  } else {
+                      setMessage(`Erro ao criar conta: ${createError.message}.`);
+                  }
                   setLoading(false);
                   return;
               }
-          }
-      } else {
-          // Se não quer login seguro (apenas cadastro de dados de contato), mantém o userId atual (anônimo ou existente)
-          // Mas garante que o usuário anônimo está logado
-          if (!authInstance.currentUser) {
-              await signInAnonymously(authInstance);
-              finalUserId = authInstance.currentUser.uid;
+          } else {
+              setMessage(`Erro de autenticação: ${signInError.message}.`);
+              setLoading(false);
+              return;
           }
       }
 
@@ -591,8 +701,9 @@ function App() {
         complement: clientComplement,
         paymentMethod: paymentMethod,
         deliveryOption: deliveryOption,
-        email: clientEmail || null, // Salva o email se fornecido
+        email: clientEmail,
         userId: finalUserId,
+        phoneVerified: phoneVerified, // Salva o status de verificação
         timestamp: new Date().toLocaleString('pt-BR')
       };
       await setDoc(clientDocRef, newClientData, { merge: true }); // Usar setDoc com merge para criar/atualizar
@@ -605,20 +716,12 @@ function App() {
       if (currentPage !== 'home' && currentPage !== 'checkout') {
           setCurrentPage('home'); // Redireciona para home após cadastro
       } else if (currentPage === 'checkout') {
-          // Se o usuário veio do checkout e se cadastrou, tenta finalizar o pedido
           setMessage("Informações de cadastro atualizadas. Agora você pode confirmar seu pedido.");
-          // O usuário permanecerá na tela de checkout para confirmar
       }
 
     } catch (error) {
       console.error("Error registering client:", error);
-      let errorMessage = "Erro ao registrar cliente. Tente novamente.";
-      if (error.code === 'auth/invalid-email') {
-          errorMessage = "Email inválido.";
-      } else if (error.code === 'auth/weak-password') {
-          errorMessage = "Senha muito fraca (mínimo 6 caracteres).";
-      }
-      setMessage(errorMessage);
+      setMessage("Erro ao registrar cliente. Tente novamente.");
     } finally {
       setLoading(false);
     }
@@ -641,10 +744,10 @@ function App() {
 
     try {
         await signInWithEmailAndPassword(authInstance, clientEmail, clientPassword);
+        // onAuthStateChanged já cuidará de buscar o registeredClient e definir o userId
         setMessage('Login realizado com sucesso!');
         setShowLoginModal(false);
-        setClientPassword(''); // Limpa a senha
-        // onAuthStateChanged já cuidará de buscar o registeredClient e definir o userId
+        setClientPassword('');
         // Redireciona para home ou mantém na tela de checkout se aplicável
         if (currentPage === 'checkout' && cart.length > 0) {
             setCurrentPage('checkout');
@@ -661,7 +764,7 @@ function App() {
         }
         setMessage(errorMessage);
     } finally {
-        setLoading(false);
+      setLoading(false);
     }
   };
 
@@ -677,6 +780,7 @@ function App() {
         setCart([]); // Limpa o carrinho ao deslogar
         setClientEmail('');
         setClientPassword('');
+        setPhoneVerified(false); // Reseta o status de verificação
         setMessage('Você saiu da sua conta.');
         setCurrentPage('home'); // Redireciona para a home
     } catch (error) {
@@ -784,7 +888,7 @@ function App() {
                     <button onClick={() => { setCurrentPage('home'); setShowNavMenu(false); }}>Home</button>
                     <button onClick={() => { setCurrentPage('orders'); setShowNavMenu(false); }}>Acompanhamento de Pedidos</button>
                     <button onClick={() => { setCurrentPage('stats'); setShowNavMenu(false); }}>Estatísticas de Rotas</button>
-                    <button onClick={() => { setShowProductManagementModal(true); setShowNavMenu(false); }}>Gerenciar Produtos</button>
+                    {/* Botão Gerenciar Produtos REMOVIDO: <button onClick={() => { setShowProductManagementModal(true); setShowNavMenu(false); }}>Gerenciar Produtos</button> */}
                     <button onClick={() => { setShowDeliveryFeesModal(true); setShowNavMenu(false); }}>Endereços e Taxas</button>
                     <button onClick={() => { setShowRegistrationModal(true); setShowNavMenu(false); }}>Meu Cadastro</button>
                     {/* Botão de Login/Logout condicional */}
@@ -802,7 +906,7 @@ function App() {
             {registeredClient ? (
                 <div className="bg-white text-red-700 font-bold py-2 px-4 rounded-full shadow-lg text-sm flex items-center gap-2">
                     <span className="text-xl">👤</span> {registeredClient.name.split(' ')[0]}
-                    {registeredClient.email && <span className="text-xs font-normal">({registeredClient.email})</span>}
+                    {authInstance?.currentUser?.email && <span className="text-xs font-normal">({authInstance.currentUser.email})</span>}
                 </div>
             ) : ( // Se não está registrado, mostra o botão de cadastro
                 <button
@@ -1051,12 +1155,12 @@ function App() {
         {currentPage === 'checkout' && (
           <section className="w-full bg-white p-6 rounded-3xl shadow-2xl border border-gray-200">
             <h2 className="text-3xl font-bold text-gray-800 mb-6 pb-3 border-b-4 border-red-400 text-center">Finalizar Pedido</h2>
-            {registeredClient ? (
+            {registeredClient && phoneVerified ? ( // Condicional para exibir apenas se o telefone foi verificado
               <div className="space-y-6">
                 <h3 className="text-2xl font-semibold text-gray-900 mb-4">Seus Dados de Entrega e Pagamento</h3>
                 <div className="bg-red-50 p-6 rounded-lg shadow-inner text-gray-800 border border-red-200">
                   <p className="text-lg mb-2"><span className="font-bold">Nome:</span> {registeredClient.name}</p>
-                  <p className="text-lg mb-2"><span className="font-bold">Telefone:</span> {registeredClient.phone}</p>
+                  <p className="text-lg mb-2"><span className="font-bold">Telefone:</span> {registeredClient.phone} {phoneVerified && <span className="text-green-600 ml-2">(Verificado)</span>}</p>
                   <p className="text-lg mb-2"><span className="font-bold">Endereço:</span> {registeredClient.address}, {registeredClient.complement}</p>
                   <p className="text-lg mb-2"><span className="font-bold">Forma de Pagamento:</span> {registeredClient.paymentMethod}</p>
                   <p className="text-lg"><span className="font-bold">Opção de Entrega:</span> {registeredClient.deliveryOption}</p>
@@ -1131,7 +1235,7 @@ function App() {
               </div>
             ) : (
               <p className="text-red-600 text-lg text-center p-4 bg-red-100 rounded-lg border border-red-300">
-                Para finalizar seu pedido, precisamos das suas informações de cadastro. <br/>
+                Para finalizar seu pedido, precisamos das suas informações de cadastro completas e seu telefone validado. <br/>
                 Por favor, clique em **"Cadastrar Agora"** ou **"Fazer Login"** para continuar.
                 <div className="flex justify-center gap-4 mt-4">
                   <button onClick={() => setShowRegistrationModal(true)} className="text-blue-700 hover:underline font-bold py-2 px-4 bg-white rounded-full shadow-md">Cadastrar Agora</button>
@@ -1204,12 +1308,62 @@ function App() {
                 />
               </div>
               
-              {/* Campos de Email e Senha */}
-              <p className="text-sm text-gray-600 italic">
-                  Para criar uma conta segura com senha e ter acesso salvo aos seus pedidos, um **email** é necessário. Você também pode cadastrar apenas com telefone para contato.
-              </p>
+              {/* Campo de Telefone e Verificação OTP */}
               <div>
-                <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">Email (Opcional, para login seguro)</label>
+                <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">Número de Celular</label>
+                <div className="flex items-center space-x-2">
+                    <input
+                      type="tel"
+                      id="clientPhone"
+                      value={clientPhone}
+                      onChange={(e) => {setClientPhone(e.target.value); setPhoneVerified(false);}} // Reseta a verificação ao mudar o número
+                      className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                      placeholder="(XX) XXXXX-XXXX"
+                      required
+                      disabled={phoneVerified} // Desabilita se já verificado
+                    />
+                    {!phoneVerified && (
+                        <button
+                        type="button"
+                        onClick={handleRequestOtp}
+                        disabled={loading || !clientPhone}
+                        className={`px-4 py-2 rounded-full text-white font-bold text-sm shadow-md transition-all duration-300
+                            ${loading || !clientPhone ? 'bg-gray-400 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700'}`}
+                        >
+                        Solicitar Código
+                        </button>
+                    )}
+                    {phoneVerified && <span className="text-green-600 font-bold">✓ Verificado</span>}
+                </div>
+                {showOtpInput && !phoneVerified && (
+                    <div className="mt-3 flex items-center space-x-2">
+                        <input
+                            type="text"
+                            id="otpCode"
+                            value={otpCode}
+                            onChange={(e) => setOtpCode(e.target.value)}
+                            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
+                            placeholder="Digite o código SMS"
+                            required
+                        />
+                        <button
+                            type="button"
+                            onClick={handleVerifyOtp}
+                            disabled={loading || !otpCode}
+                            className={`px-4 py-2 rounded-full text-white font-bold text-sm shadow-md transition-all duration-300
+                                ${loading || !otpCode ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700'}`}
+                        >
+                            Verificar Código
+                        </button>
+                    </div>
+                )}
+                {/* reCAPTCHA container - importante para a validação de telefone */}
+                <div id="recaptcha-container" className="mt-4"></div>
+              </div>
+
+              {/* Email e Senha (agora obrigatórios para login seguro) */}
+              <div>
+                <label htmlFor="clientEmail" className="block text-sm font-medium text-gray-700 mb-1">Email (Obrigatório para login seguro)</label>
                 <input
                   type="email"
                   id="clientEmail"
@@ -1217,11 +1371,12 @@ function App() {
                   onChange={(e) => setClientEmail(e.target.value)}
                   className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
                   placeholder="seu.email@exemplo.com"
-                  disabled={authInstance && authInstance.currentUser && !authInstance.currentUser.isAnonymous && registeredClient?.email} // Desabilita se já logado com email
+                  required
+                  disabled={registeredClient && registeredClient.email && !authInstance?.currentUser?.isAnonymous} // Desabilita se já tem email associado e não é anônimo
                 />
               </div>
               <div>
-                <label htmlFor="clientPassword" className="block text-sm font-medium text-gray-700 mb-1">Senha (Mínimo 6 caracteres, se usar email)</label>
+                <label htmlFor="clientPassword" className="block text-sm font-medium text-gray-700 mb-1">Senha (Mínimo 6 caracteres)</label>
                 <input
                   type="password"
                   id="clientPassword"
@@ -1229,24 +1384,10 @@ function App() {
                   onChange={(e) => setClientPassword(e.target.value)}
                   className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
                   placeholder="••••••••"
-                  required={!!clientEmail && (!registeredClient || !authInstance.currentUser || authInstance.currentUser.isAnonymous)} // Requer senha se email fornecido e não está logado ou é anônimo
+                  required={true} // Senha agora é sempre obrigatória para o cadastro completo
                 />
               </div>
 
-              {/* Campo de Telefone (Obrigatório para contato) */}
-              <div>
-                <label htmlFor="clientPhone" className="block text-sm font-medium text-gray-700 mb-1">Número de Celular (Obrigatório para contato)</label>
-                <input
-                  type="tel"
-                  id="clientPhone"
-                  value={clientPhone}
-                  onChange={(e) => setClientPhone(e.target.value)}
-                  className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 text-base"
-                  placeholder="(XX) XXXXX-XXXX"
-                  required
-                />
-              </div>
-              
               {/* Campos de Endereço, Pagamento, Entrega */}
               <div>
                 <label htmlFor="clientAddress" className="block text-sm font-medium text-gray-700 mb-1">Endereço</label>
@@ -1260,7 +1401,7 @@ function App() {
                 />
               </div>
               <div>
-                <label htmlFor="clientComplement" className="block text-sm font-medium text-gray-700 mb-1">Complemento</label>
+                <label htmlFor="clientComplement" className="block text-sm font-medium text-gray-700 mb-1">Complemento (Ex: Apt 101, Bloco B)</label>
                 <input
                   type="text"
                   id="clientComplement"
@@ -1321,9 +1462,9 @@ function App() {
                 </button>
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || !phoneVerified} // Habilita o botão apenas após verificação do telefone
                   className={`px-6 py-2.5 rounded-full text-white font-bold shadow-lg transition-all duration-300 glow-button
-                    ${loading ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
+                    ${loading || !phoneVerified ? 'bg-gray-400 cursor-not-allowed' : 'bg-red-600 hover:bg-red-700 transform hover:scale-105'}`}
                 >
                   {loading ? 'Registrando...' : (registeredClient ? 'Atualizar Cadastro' : 'Registrar')}
                 </button>
@@ -1331,11 +1472,9 @@ function App() {
               {message && (
                 <p className="mt-3 text-center text-sm font-semibold text-red-700 animate-pulse">{message}</p>
               )}
-              {(!registeredClient || authInstance?.currentUser?.isAnonymous) && ( // Mostra link para login se não registrado ou anônimo
-                <div className="text-center mt-4">
-                    <p className="text-gray-600">Já tem conta? <button type="button" onClick={() => {setShowRegistrationModal(false); setShowLoginModal(true);}} className="text-blue-700 hover:underline font-bold">Faça login</button></p>
-                </div>
-              )}
+              <div className="text-center mt-4">
+                  <p className="text-gray-600">Já tem conta? <button type="button" onClick={() => {setShowRegistrationModal(false); setShowLoginModal(true);}} className="text-blue-700 hover:underline font-bold">Faça login</button></p>
+              </div>
             </form>
             <button
               onClick={() => setShowRegistrationModal(false)}
@@ -1488,7 +1627,7 @@ function App() {
         </div>
       )}
 
-      {/* Product Management Modal */}
+      {/* Product Management Modal - Manter oculto para uso interno no futuro */}
       {showProductManagementModal && (
         <div className="modal-overlay" onClick={() => setShowProductManagementModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
