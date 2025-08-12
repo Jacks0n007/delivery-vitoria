@@ -10,7 +10,7 @@ const firebaseConfig = {
   authDomain: "deliveryvitoriaapp.firebaseapp.com", // SEU VALOR AQUI
   projectId: "deliveryvitoriaapp", // SEU VALOR AQUI
   storageBucket: "deliveryvitoriaapp.firebasestorage.app", // SEU VALOR AQUI
-  messagingSenderId: "97567737035", // SEU VALOR AQUI
+  messagingSenderId: "97567737035", // SEU VALUOR AQUI
   appId: "1:97567737035:web:0b509a3c0bb0242474c74e" // SEU VALOR AQUI
 };
 
@@ -19,12 +19,8 @@ let appInstance;
 let dbInstance;
 let authInstance;
 
-// CORREÇÃO ESSENCIAL PARA NETLIFY/LOCAL:
-// __initial_auth_token e __app_id são variáveis do ambiente Canvas (aqui onde conversamos).
-// Para builds fora do Canvas (no Netlify ou localmente), elas NÃO EXISTEM.
-// Definimos valores padrão adequados para esses ambientes.
-const initialAuthTokenForBuild = null; // Não usaremos um token customizado fora do Canvas.
-const appIdForBuild = 'default-app-id'; // Usamos o ID que você configurou no Firestore para o caminho público.
+const initialAuthTokenForBuild = null;
+const appIdForBuild = 'default-app-id';
 
 
 // Main App component for the Order Separator
@@ -51,6 +47,10 @@ function App() {
   // Estado para armazenar as estatísticas de rotas
   const [routeStats, setRouteStats] = useState({});
 
+  // ESTADOS PARA NAVEGAÇÃO E MENU
+  const [currentPage, setCurrentPage] = useState('home'); // 'home', 'orders', 'stats'
+  const [showNavMenu, setShowNavMenu] = useState(false);
+
 
   const [clientName, setClientName] = useState('');
   const [clientPhone, setClientPhone] = useState('');
@@ -64,11 +64,9 @@ function App() {
   const [newProductStock, setNewProductStock] = useState('');
   const [newProductImageUrl, setNewProductImageUrl] = useState('');
 
-  // PROMOÇÕES AGORA SÃO CARREGADAS DO FIREBASE
   const [promotions, setPromotions] = useState([]);
 
 
-  // Áreas de entrega e suas taxas (adicionada opção "Retirar no Local")
   const [deliveryAreas] = useState([
     { id: 'retirar_no_local', name: 'Retirar no Local', fee: 0.00 },
     { id: 'itanhanga', name: 'Itanhangá', fee: 3.00 },
@@ -97,16 +95,15 @@ function App() {
           setUserId(user.uid);
         } else {
           try {
-            // Usa initialAuthTokenForBuild (que é null fora do Canvas) ou signInAnonymously
-            if (initialAuthTokenForBuild) { // Esta condição será falsa fora do Canvas
+            if (initialAuthTokenForBuild) {
               await signInWithCustomToken(authInstance, initialAuthTokenForBuild);
             } else {
-              await signInAnonymously(authInstance); // Autenticação anônima para ambientes externos
+              await signInAnonymously(authInstance);
             }
           } catch (error) {
             console.error("Firebase Auth Error during sign-in:", error);
             setMessage("Erro na autenticação. Tente novamente.");
-            setUserId(crypto.randomUUID()); // Fallback: gera um ID de usuário aleatório
+            setUserId(crypto.randomUUID());
           }
         }
         setIsAuthReady(true);
@@ -118,11 +115,10 @@ function App() {
       setMessage("Erro ao conectar ao sistema. Verifique a configuração do Firebase.");
       setIsAuthReady(true);
     }
-  }, []); // Dependência vazia, pois essa inicialização acontece apenas uma vez.
+  }, []);
 
   // Fetch products from Firestore
   useEffect(() => {
-    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance) return;
 
     const productsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/products`);
@@ -140,13 +136,11 @@ function App() {
       setMessage("Erro ao carregar produtos. Verifique as regras de segurança do Firestore e o caminho 'default-app-id'.");
     });
 
-    // Removido dbInstance das dependências aqui. isAuthReady e appIdForBuild são suficientes.
     return () => unsubscribeProducts();
-  }, [isAuthReady]); 
+  }, [isAuthReady]);
 
   // useEffect para buscar promoções do Firestore
   useEffect(() => {
-    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance) return;
 
     const promotionsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/promotions`);
@@ -164,16 +158,13 @@ function App() {
       setMessage("Erro ao carregar promoções. Verifique as regras de segurança do Firestore.");
     });
 
-    // Removido dbInstance das dependências aqui. isAuthReady e appIdForBuild são suficientes.
     return () => unsubscribePromotions();
   }, [isAuthReady]);
 
   // useEffect para buscar estatísticas de rotas do Firestore
   useEffect(() => {
-    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance) return;
 
-    // Monitora a coleção de estatísticas de rotas
     const routeStatsCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/public/data/deliveryRoutesStats`);
     
     const unsubscribeRouteStats = onSnapshot(routeStatsCollectionRef, (snapshot) => {
@@ -188,17 +179,14 @@ function App() {
       setMessage("Erro ao carregar estatísticas de rotas.");
     });
 
-    // Removido dbInstance das dependências aqui. isAuthReady e appIdForBuild são suficientes.
     return () => unsubscribeRouteStats();
   }, [isAuthReady]);
 
 
   // Fetch orders from Firestore (for the 'Pedidos Finalizados' section)
   useEffect(() => {
-    // Adicionamos a verificação dbInstance aqui, e removemos de dependências
     if (!isAuthReady || !dbInstance || !userId) return;
 
-    // A coleção de pedidos é específica do usuário e usa o appIdForBuild
     const ordersCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`);
     const q = query(ordersCollectionRef);
 
@@ -209,14 +197,11 @@ function App() {
       }));
       setOrders(ordersData);
       console.log("Pedidos carregados do Firestore:", ordersData);
-    }, (error) => {
-      console.error("Error fetching orders from Firestore:", error);
-      setMessage("Erro ao carregar pedidos. Verifique as regras de segurança do Firestore.");
-    });
+    }, [isAuthReady, userId]);
 
-    // Removido dbInstance das dependências aqui. isAuthReady, userId e appIdForBuild são suficientes.
     return () => unsubscribeOrders();
-  }, [isAuthReady, userId]);
+  }, [isAuthReady, userId]); // Removi dbInstance daqui.
+
 
   // Function to add a product or promotion to the cart or update its quantity
   const addToCart = async (itemToAdd, isPromo = false) => {
@@ -261,11 +246,9 @@ function App() {
           setMessage(`"${itemToAdd.name}" adicionado ao carrinho! Estoque atualizado.`);
         } else {
           setMessage(`"${itemToAdd.name}" está fora de estoque.`);
-          // Opcionalmente, remova o item do carrinho se a atualização de estoque falhou devido a estoque 0
           setCart(prevCart => prevCart.filter(item => item.id !== itemToAdd.id));
         }
       } else {
-        // Log para depuração: se o item da promoção não for encontrado na coleção de produtos.
         console.warn(`Item de promoção "${itemToAdd.name}" (ID: ${itemToAdd.id}) não encontrado na coleção de produtos para atualização de estoque.`);
         setMessage(`"${itemToAdd.name}" adicionado ao carrinho, mas o estoque não pôde ser atualizado (produto não encontrado).`);
       }
@@ -289,7 +272,7 @@ function App() {
         
         if (productSnap.exists()) {
           const currentStock = productSnap.data().stock || 0;
-          await updateDoc(productRef, { stock: currentStock + itemToRemove.quantity }); // Adiciona de volta a quantidade total removida do carrinho
+          await updateDoc(productRef, { stock: currentStock + itemToRemove.quantity });
           setMessage(`"${itemToRemove.name}" removido do carrinho. Estoque atualizado.`);
         }
       } catch (error) {
@@ -332,11 +315,10 @@ function App() {
           setMessage(`Quantidade de "${oldItem.name}" atualizada. Estoque: ${newStock}`);
         } else {
           setMessage(`Não há estoque suficiente de "${oldItem.name}" para esta quantidade.`);
-          // Reverte a quantidade no carrinho para o estoque máximo disponível
           setCart((prevCart) =>
             prevCart.map((item) =>
               item.id === itemId
-                ? { ...item, quantity: currentStock + oldItem.quantity } // Define para o estoque atual + o que já estava no carrinho
+                ? { ...item, quantity: currentStock + oldItem.quantity }
                 : item
             )
           );
@@ -353,7 +335,7 @@ function App() {
   const updateItemNote = (itemId, newNote) => {
     setCart((prevCart) =>
       prevCart.map((item) => {
-        let cleanNote = newNote.replace(` (Promoção: ${item.name.replace('!', '')})`, '').trim(); // Remove a nota de promoção para edição
+        let cleanNote = newNote.replace(` (Promoção: ${item.name.replace('!', '')})`, '').trim();
         let finalNote = item.isPromoItem ? ` (Promoção: ${item.name.replace('!', '')}) ${cleanNote}`.trim() : cleanNote;
         return item.id === itemId
           ? { ...item, note: finalNote }
@@ -380,16 +362,15 @@ function App() {
       const newOrderData = {
         items: cart,
         total: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
-        status: 'Pendente', // Status inicial
+        status: 'Pendente',
         timestamp: new Date().toLocaleString('pt-BR'),
         clientInfo: registeredClient,
-        userId: userId, // Armazena o ID do usuário com o pedido
+        userId: userId,
       };
 
-      // Adiciona o pedido ao Firestore em uma coleção específica do usuário
       await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`), newOrderData);
 
-      setCart([]); // Limpa o carrinho após finalizar o pedido
+      setCart([]);
       setLoading(false);
       setMessage(`Pedido realizado com sucesso!`);
     } catch (error) {
@@ -410,7 +391,6 @@ function App() {
     try {
       const orderDocRef = doc(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`, orderId);
       
-      // Se o status for 'Separado', abre a modal de decisão de entrega
       if (newStatus === 'Separado') {
         const orderToDecide = orders.find(order => order.id === orderId);
         if (orderToDecide) {
@@ -450,16 +430,13 @@ function App() {
       await updateDoc(orderDocRef, {
         finalDeliveryOption: chosenArea ? chosenArea.name : 'Não Definido',
         deliveryFee: deliveryFee,
-        total: selectedOrderForDelivery.total + deliveryFee, // Adiciona a taxa ao total
-        status: finalStatus // Atualiza o status final
+        total: selectedOrderForDelivery.total + deliveryFee,
+        status: finalStatus
       });
 
       // Atualiza as estatísticas de rota
       const routeStatsRef = doc(dbInstance, `artifacts/${appIdForBuild}/public/data/deliveryRoutesStats`, chosenArea.id);
       
-      // Usa setDoc com merge:true para criar ou atualizar o documento da rota
-      // Se o documento não existir, ele será criado com count: 1.
-      // Se existir, o count será incrementado.
       await setDoc(routeStatsRef, { name: chosenArea.name, count: (routeStats[chosenArea.id]?.count || 0) + 1 }, { merge: true });
 
       setMessage(`Opção de entrega para pedido #${selectedOrderForDelivery.id.substring(0,8)}... registrada!`);
@@ -494,16 +471,14 @@ function App() {
         complement: clientComplement,
         paymentMethod: paymentMethod,
         deliveryOption: deliveryOption,
-        userId: userId, // Associate client with the authenticated user
+        userId: userId,
         timestamp: new Date().toLocaleString('pt-BR')
       };
-      // Store client data in a public collection
       await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/public/data/clients`), newClientData);
 
-      setRegisteredClient(newClientData); // Set the locally registered client
+      setRegisteredClient(newClientData);
       setMessage('Cadastro realizado com sucesso!');
       setShowRegistrationModal(false);
-      // Clear form fields
       setClientName('');
       setClientPhone('');
       setClientAddress('');
@@ -536,23 +511,20 @@ function App() {
     try {
       const productData = {
         name: newProductName,
-        price: parseFloat(newProductPrice), // Convert price to number
-        stock: parseInt(newProductStock),   // Convert stock to number
+        price: parseFloat(newProductPrice),
+        stock: parseInt(newProductStock),
         imageUrl: newProductImageUrl,
         timestamp: new Date().toLocaleString('pt-BR'),
-        addedBy: userId // Track who added the product
+        addedBy: userId
       };
 
-      // Add the new product to the 'products' collection in Firestore
       await addDoc(collection(dbInstance, `artifacts/${appIdForBuild}/public/data/products`), productData);
 
       setMessage('Produto adicionado com sucesso!');
-      // Clear form fields after submission
       setNewProductName('');
       setNewProductPrice('');
       setNewProductStock('');
       setNewProductImageUrl('');
-      // No need to close modal immediately, user might want to add more
     } catch (error) {
       console.error("Error adding product:", error);
       setMessage("Erro ao adicionar produto. Tente novamente.");
@@ -568,11 +540,10 @@ function App() {
       setMessage('A mensagem não pode estar vazia.');
       return;
     }
-    // Simulate sending message (e.g., to a backend or another user)
     console.log('Mensagem do Cliente:', chatMessage);
     setMessage('Mensagem enviada para a equipe de separação!');
-    setChatMessage(''); // Clear chat input
-    setShowChatModal(false); // Close chat modal after sending
+    setChatMessage('');
+    setShowChatModal(false);
   };
 
 
@@ -594,15 +565,15 @@ function App() {
 
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 p-4 font-sans antialiased flex flex-col items-center">
+    <div className="min-h-screen bg-gradient-to-br from-red-50 to-orange-100 p-4 font-sans antialiased flex flex-col items-center w-full"> {/* w-full para cobrir a tela */}
       <script src="https://cdn.tailwindcss.com"></script>
       <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
       <style>
         {`
-        body { font-family: 'Inter', sans-serif; }
+        body { font-family: 'Inter', sans-serif; margin: 0; overflow-x: hidden; } /* Remove margin e overflow-x */
         .scrollable-list {
-            max-height: 400px; /* Fixed height for scrollable areas */
-            overflow-y: auto; /* Enable vertical scrolling */
+            max-height: 400px;
+            overflow-y: auto;
         }
         .modal-overlay {
             position: fixed;
@@ -618,20 +589,19 @@ function App() {
         }
         .modal-content {
             background-color: white;
-            padding: 2.5rem; /* Increased padding */
-            border-radius: 1.5rem; /* rounded-3xl */
-            box-shadow: 0 15px 25px rgba(0, 0, 0, 0.3); /* shadow-2xl */
-            max-width: 550px; /* Increased max-width */
+            padding: 2.5rem;
+            border-radius: 1.5rem;
+            box-shadow: 0 15px 25px rgba(0, 0, 0, 0.3);
+            max-width: 550px;
             width: 90%;
             position: relative;
-            transform: translateY(-20px); /* Slight lift animation */
+            transform: translateY(-20px);
             animation: modalPopIn 0.3s ease-out forwards;
         }
         @keyframes modalPopIn {
           from { opacity: 0; transform: translateY(-50px); }
           to { opacity: 1; transform: translateY(0); }
         }
-        /* Custom scrollbar for horizontal promotions */
         .promotions-carousel::-webkit-scrollbar {
           height: 8px;
         }
@@ -640,54 +610,104 @@ function App() {
           border-radius: 10px;
         }
         .promotions-carousel::-webkit-scrollbar-thumb {
-          background: #ef4444; /* red-500 */
+          background: #ef4444;
           border-radius: 10px;
         }
         .promotions-carousel::-webkit-scrollbar-thumb:hover {
-          background: #dc2626; /* red-600 */
+          background: #dc2626;
         }
         .glow-button {
           transition: all 0.3s ease;
         }
         .glow-button:hover {
-          box-shadow: 0 0 15px rgba(239, 68, 68, 0.6); /* red-500 with glow */
+          box-shadow: 0 0 15px rgba(239, 68, 68, 0.6);
+        }
+        .nav-menu {
+          position: absolute;
+          top: 70px; /* Ajuste para ficar abaixo do botão de menu */
+          left: 1rem;
+          background-color: white;
+          border-radius: 0.75rem; /* rounded-xl */
+          box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1); /* shadow-xl */
+          z-index: 999;
+          padding: 0.75rem; /* p-3 */
+          min-width: 180px;
+          animation: fadeIn 0.2s ease-out forwards;
+        }
+        .nav-menu button {
+          display: block;
+          width: 100%;
+          text-align: left;
+          padding: 0.75rem 1rem; /* py-3 px-4 */
+          border-radius: 0.5rem; /* rounded-lg */
+          font-weight: 500; /* font-medium */
+          color: #374151; /* gray-700 */
+          transition: background-color 0.2s, color 0.2s;
+        }
+        .nav-menu button:hover {
+          background-color: #fef2f2; /* red-50 */
+          color: #b91c1c; /* red-700 */
+        }
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
         `}
       </style>
 
       {/* Header Section */}
-      <header className="w-full max-w-4xl bg-gradient-to-br from-red-600 to-red-800 text-white p-6 rounded-3xl shadow-2xl mb-10 text-center relative transform transition-all duration-300 hover:scale-10glow">
-        <h1 className="text-5xl font-extrabold mb-3 tracking-tight">Delivery Vitória</h1>
-        <p className="text-xl font-light opacity-90">O seu separador de pedidos inteligente</p>
-        {/* Chat button on top-left */}
-        <div className="absolute top-6 left-6 flex flex-col space-y-3">
+      <header className="w-full bg-gradient-to-br from-red-600 to-red-800 text-white p-6 md:p-8 lg:p-10 rounded-b-3xl shadow-2xl mb-10 text-center relative transition-all duration-300">
+        <h1 className="text-4xl md:text-5xl lg:text-6xl font-extrabold mb-3 tracking-tight">Delivery Vitória</h1>
+        <p className="text-lg md:text-xl font-light opacity-90">O seu separador de pedidos inteligente</p>
+        
+        {/* Menu de Três Pontinhos */}
+        <div className="absolute top-6 left-6 z-50">
+            <button
+            onClick={() => setShowNavMenu(!showNavMenu)}
+            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
+            title="Menu de Navegação"
+            aria-haspopup="true"
+            aria-expanded={showNavMenu}
+            >
+                <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20" xmlns="http://www.w3.org/2000/svg">
+                    <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 8a2 2 0 110-4 2 2 0 010 4zm0 8a2 2 0 110-4 2 2 0 010 4z"/>
+                </svg>
+            </button>
+            {showNavMenu && (
+                <div className="nav-menu">
+                    <button onClick={() => { setCurrentPage('home'); setShowNavMenu(false); }}>Home</button>
+                    <button onClick={() => { setCurrentPage('orders'); setShowNavMenu(false); }}>Acompanhamento de Pedidos</button>
+                    <button onClick={() => { setCurrentPage('stats'); setShowNavMenu(false); }}>Estatísticas de Rotas</button>
+                </div>
+            )}
+        </div>
+
+        {/* Botões de Ação no Canto Superior Direito */}
+        <div className="absolute top-6 right-6 flex flex-col space-y-3">
             <button
             onClick={() => setShowChatModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button"
+            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
             title="Falar com a Equipe"
             >
             <span className="text-xl">💬</span>
             </button>
             <button
             onClick={() => setShowProductManagementModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button"
+            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
             title="Gerenciar Produtos"
             >
             <span className="text-xl">📦</span>
             </button>
-        </div>
-        {/* Registration and Delivery Fees buttons on top-right */}
-        <div className="absolute top-6 right-6 flex flex-col space-y-3">
             <button
             onClick={() => setShowRegistrationModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button"
+            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
             title="Registro do Cliente"
             >
             <span className="text-xl">👤</span>
             </button>
             <button
             onClick={() => setShowDeliveryFeesModal(true)}
-            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button"
+            className="bg-white text-red-700 hover:bg-red-800 hover:text-white font-bold p-3 rounded-full shadow-lg transition-all duration-300 transform hover:scale-110 glow-button focus:outline-none focus:ring-2 focus:ring-red-300"
             title="Endereços e Taxas"
             >
             <span className="text-xl">📍</span>
@@ -695,250 +715,267 @@ function App() {
         </div>
       </header>
 
-      {/* Main Content Area */}
-      <main className="w-full max-w-4xl bg-white p-8 rounded-3xl shadow-2xl flex flex-col gap-10 border border-gray-200">
-        <div className="flex flex-col md:flex-row gap-10">
-          {/* Products List Section */}
-          <section className="flex-1 bg-gray-50 p-6 rounded-2xl shadow-inner">
-            <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Produtos Disponíveis</h2>
-            {products.length === 0 ? (
-                <p className="text-gray-600 italic text-lg">Carregando produtos ou nenhum produto adicionado ainda...</p>
+      {/* Main Content Area - Renderizado condicionalmente */}
+      <main className="w-full p-4 md:p-8 lg:p-10 flex flex-col gap-10"> {/* w-full para cobrir a tela */}
+        {message && (
+            <div className="bg-yellow-100 border-l-4 border-yellow-500 text-yellow-700 p-4 rounded-md shadow-md mb-6 animate-pulse" role="alert">
+            <p className="font-bold">Aviso:</p>
+            <p>{message}</p>
+            </div>
+        )}
+
+        {/* Home Page */}
+        {currentPage === 'home' && (
+          <div className="flex flex-col lg:flex-row gap-10">
+            {/* Products List Section */}
+            <section className="flex-1 bg-white p-6 rounded-3xl shadow-2xl border border-gray-200">
+              <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Produtos Disponíveis</h2>
+              {products.length === 0 ? (
+                  <p className="text-gray-600 italic text-lg">Carregando produtos ou nenhum produto adicionado ainda...</p>
+              ) : (
+                  <div className="scrollable-list pr-2">
+                  {products.map((product) => (
+                      <div
+                      key={product.id}
+                      className="flex items-center justify-between bg-gray-50 p-4 mb-4 rounded-xl shadow-md border border-gray-100 hover:shadow-lg hover:bg-red-50 transition-all duration-300 transform hover:-translate-y-1"
+                      >
+                      <div className="flex items-center">
+                          <img src={product.imageUrl} alt={product.name} className="w-20 h-20 rounded-lg object-cover mr-4 border border-gray-200 shadow-sm" />
+                          <div>
+                          <h3 className="text-xl font-semibold text-gray-900 mb-1">{product.name}</h3>
+                          <p className="text-red-700 text-lg font-bold">R$ {product.price ? product.price.toFixed(2) : 'N/A'}</p>
+                          <p className="text-sm text-gray-500">Estoque: {product.stock || 'N/A'}</p>
+                          </div>
+                      </div>
+                      <button
+                          onClick={() => addToCart(product)}
+                          className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105 glow-button"
+                      >
+                          Adicionar
+                      </button>
+                      </div>
+                  ))}
+                  </div>
+              )}
+            </section>
+
+            {/* Cart and Order Summary Section */}
+            <section className="flex-1 bg-white p-6 rounded-3xl shadow-2xl border border-gray-200">
+              <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Carrinho (Novo Pedido)</h2>
+              {cart.length === 0 ? (
+                <p className="text-gray-600 italic text-lg">O carrinho está vazio. Adicione produtos para criar um pedido.</p>
+              ) : (
+                <div className="scrollable-list pr-2">
+                  {cart.map((item) => (
+                    <div
+                      key={item.id}
+                      className="flex flex-col bg-gray-50 p-4 mb-4 rounded-xl shadow-md border border-gray-100 hover:shadow-lg hover:bg-red-50 transition-all duration-300 transform hover:-translate-y-1"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center">
+                          <img src={item.imageUrl} alt={item.name} className="w-20 h-20 rounded-lg object-cover mr-4 border border-gray-200 shadow-sm" />
+                          <div>
+                            <h3 className="text-xl font-semibold text-gray-900 mb-1">{item.name}</h3>
+                            <p className="text-red-700 text-lg font-bold">R$ {item.price.toFixed(2)} x {item.quantity}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-3">
+                          <input
+                            type="number"
+                            min="1"
+                            value={item.quantity}
+                            onChange={(e) => updateQuantity(item.id, parseInt(e.target.value))}
+                            className="w-20 p-2 border border-gray-300 rounded-md text-center text-base focus:ring-red-500 focus:border-red-500"
+                          />
+                          <button
+                            onClick={() => removeFromCart(item.id)}
+                            className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                          >
+                            Remover
+                          </button>
+                        </div>
+                      </div>
+                      {/* Observation field */}
+                      <div className="mt-3 w-full">
+                        <label htmlFor={`note-${item.id}`} className="block text-sm font-medium text-gray-700 mb-1">
+                          Observação:
+                        </label>
+                        <textarea
+                          id={`note-${item.id}`}
+                          value={item.note.replace(` (Promoção: ${item.name.replace('!', '')})`, '').trim()}
+                          onChange={(e) => updateItemNote(item.id, (item.isPromoItem ? ` (Promoção: ${item.name.replace('!', '')}) ` : '') + e.target.value)}
+                          rows="2"
+                          className="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500 text-sm"
+                          placeholder="Ex: Sem glúten, embalar para presente..."
+                        ></textarea>
+                        {item.isPromoItem && (
+                          <p className="text-xs text-red-600 italic mt-1">Item adicionado via promoção.</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div className="text-right mt-6 pt-6 border-t-2 border-red-300">
+                    <p className="text-2xl font-bold text-gray-800 mb-3">
+                      Total: R$ {cart.reduce((sum, item) => item.price * item.quantity, 0).toFixed(2)}
+                    </p>
+                    {registeredClient && (
+                      <div className="text-left bg-red-100 p-4 rounded-lg mb-4 text-base text-red-900 shadow-inner">
+                        <p><span className="font-semibold">Cliente Selecionado:</span> {registeredClient.name}</p>
+                        <p><span className="font-semibold">Entrega:</span> {registeredClient.deliveryOption}</p>
+                      </div>
+                    )}
+                    <button
+                      onClick={finalizeOrder}
+                      disabled={loading || cart.length === 0}
+                      className={`mt-4 px-8 py-3 rounded-full text-white font-bold text-xl shadow-xl transition-all duration-300 glow-button
+                        ${loading || cart.length === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 transform hover:scale-105'}`}
+                    >
+                      {loading ? 'Finalizando...' : 'Finalizar Pedido'}
+                    </button>
+                    {message && (
+                      <p className="mt-3 text-sm font-semibold text-red-700 animate-pulse">{message}</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
+        {/* Orders Page */}
+        {currentPage === 'orders' && (
+            <section className="w-full bg-white p-6 rounded-3xl shadow-2xl border border-gray-200">
+            <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Acompanhamento de Pedidos</h2>
+            {orders.length === 0 ? (
+                <p className="text-gray-600 italic text-lg">Nenhum pedido finalizado ainda.</p>
             ) : (
                 <div className="scrollable-list pr-2">
-                {products.map((product) => (
+                {orders.map((order) => (
                     <div
-                    key={product.id}
-                    className="flex items-center justify-between bg-white p-4 mb-4 rounded-xl shadow-md border border-gray-100 hover:shadow-lg hover:bg-red-50 transition-all duration-300 transform hover:-translate-y-1"
+                    key={order.id}
+                    className="bg-gray-50 p-5 mb-4 rounded-xl shadow-md flex flex-col md:flex-row justify-between items-start md:items-center border border-gray-100 hover:shadow-lg transition-all duration-300"
                     >
-                    <div className="flex items-center">
-                        <img src={product.imageUrl} alt={product.name} className="w-20 h-20 rounded-lg object-cover mr-4 border border-gray-200 shadow-sm" />
-                        <div>
-                        <h3 className="text-xl font-semibold text-gray-900 mb-1">{product.name}</h3>
-                        <p className="text-red-700 text-lg font-bold">R$ {product.price ? product.price.toFixed(2) : 'N/A'}</p>
-                        <p className="text-sm text-gray-500">Estoque: {product.stock || 'N/A'}</p>
+                    <div className="mb-4 md:mb-0 md:w-1/2">
+                        <h3 className="text-2xl font-bold text-red-800 mb-2">Pedido #{order.id.substring(0, 8)}...</h3>
+                        <p className="text-gray-700 text-sm mb-1">Data: <span className="font-medium">{order.timestamp}</span></p>
+                        <p className="text-xl font-bold text-gray-900 mb-2">Total: R$ {order.total.toFixed(2)}</p>
+                        <p className={`text-lg font-bold
+                            ${order.status === 'Pendente' ? 'text-red-600' :
+                            order.status === 'Em Separação' ? 'text-orange-500' :
+                            order.status === 'Separado' ? 'text-purple-600' :
+                            order.status === 'Aguardando Retirada' ? 'text-blue-600' :
+                            order.status === 'Em Rota de Entrega' ? 'text-teal-600' : 'text-green-600'}`}>
+                        Status: {order.status}
+                        </p>
+                        {order.finalDeliveryOption && (
+                        <p className="text-sm text-gray-600 mt-1"><span className="font-semibold">Entrega Final:</span> {order.finalDeliveryOption} {order.deliveryFee > 0 && `(R$ ${order.deliveryFee.toFixed(2)})`}</p>
+                        )}
+                        {order.clientInfo && (
+                        <div className="mt-3 text-sm text-gray-600 bg-gray-100 p-3 rounded-lg border border-gray-200">
+                            <p><span className="font-semibold">Cliente:</span> {order.clientInfo.name}</p>
+                            <p><span className="font-semibold">Telefone:</span> {order.clientInfo.phone}</p>
+                            <p><span className="font-semibold">Endereço:</span> {order.clientInfo.address}{order.clientInfo.complement && `, ${order.clientInfo.complement}`}</p>
+                            <p><span className="font-semibold">Pagamento:</span> {order.clientInfo.paymentMethod}</p>
+                            <p><span className="font-semibold">Entrega Preferida:</span> {order.clientInfo.deliveryOption}</p>
+                        </div>
+                        )}
+                    </div>
+                    <div className="w-full md:w-1/2 md:pl-6">
+                        <h4 className="font-semibold text-gray-800 mb-2 text-lg">Itens do Pedido:</h4>
+                        <ul className="list-disc list-inside text-gray-700 space-y-1">
+                        {order.items.map((item) => (
+                            <li key={item.id} className="text-base">
+                            {item.name} (<span className="font-medium">{item.quantity}x</span>)
+                            {item.note && <span className="text-gray-500 italic ml-2"> (Obs: {item.note})</span>}
+                            </li>
+                        ))}
+                        </ul>
+                        {/* Botões de status */}
+                        <div className="mt-4 flex flex-wrap gap-2">
+                        {order.status === 'Pendente' && (
+                            <button
+                            onClick={() => updateOrderStatus(order.id, 'Em Separação')}
+                            className="bg-red-700 hover:bg-red-800 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                            >
+                            Marcar Em Separação
+                            </button>
+                        )}
+                        {order.status === 'Em Separação' && (
+                            <button
+                            onClick={() => updateOrderStatus(order.id, 'Separado')}
+                            className="bg-purple-600 hover:bg-purple-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                            >
+                            Marcar Separado (Decidir Entrega)
+                            </button>
+                        )}
+                        {(order.status === 'Aguardando Retirada' || order.status === 'Em Rota de Entrega') && (
+                            <button
+                            onClick={() => updateOrderStatus(order.id, 'Finalizado')}
+                            className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
+                            >
+                            Marcar como Finalizado
+                            </button>
+                        )}
                         </div>
                     </div>
-                    <button
-                        onClick={() => addToCart(product)}
-                        className="bg-red-600 hover:bg-red-700 text-white font-semibold py-2.5 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-105 glow-button"
-                    >
-                        Adicionar
-                    </button>
                     </div>
                 ))}
                 </div>
             )}
-          </section>
+            </section>
+        )}
 
-          {/* Cart and Order Summary Section */}
-          <section className="flex-1 bg-gray-50 p-6 rounded-2xl shadow-inner">
-            <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Carrinho (Novo Pedido)</h2>
-            {cart.length === 0 ? (
-              <p className="text-gray-600 italic text-lg">O carrinho está vazio. Adicione produtos para criar um pedido.</p>
+        {/* Stats Page */}
+        {currentPage === 'stats' && (
+            <section className="w-full bg-white p-6 rounded-3xl shadow-2xl border border-gray-200">
+            <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Estatísticas de Rotas</h2>
+            {Object.keys(routeStats).length === 0 ? (
+                <p className="text-gray-600 italic text-lg">Nenhum dado de rota disponível ainda.</p>
             ) : (
-              <div className="scrollable-list pr-2">
-                {cart.map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex flex-col bg-white p-4 mb-4 rounded-xl shadow-md border border-gray-100 hover:shadow-lg hover:bg-red-50 transition-all duration-300 transform hover:-translate-y-1"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center">
-                        <img src={item.imageUrl} alt={item.name} className="w-20 h-20 rounded-lg object-cover mr-4 border border-gray-200 shadow-sm" />
-                        <div>
-                          <h3 className="text-xl font-semibold text-gray-900 mb-1">{item.name}</h3>
-                          <p className="text-red-700 text-lg font-bold">R$ {item.price.toFixed(2)} x {item.quantity}</p>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-3">
-                        <input
-                          type="number"
-                          min="1"
-                          value={item.quantity}
-                          onChange={(e) => updateQuantity(item.id, parseInt(e.target.value))}
-                          className="w-20 p-2 border border-gray-300 rounded-md text-center text-base focus:ring-red-500 focus:border-red-500"
-                        />
-                        <button
-                          onClick={() => removeFromCart(item.id)}
-                          className="bg-red-500 hover:bg-red-600 text-white font-semibold py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
-                        >
-                          Remover
-                        </button>
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {Object.entries(routeStats).map(([routeId, data]) => (
+                    <div key={routeId} className="bg-gray-50 p-4 rounded-lg shadow-md border border-gray-100">
+                    <h3 className="text-xl font-semibold text-gray-900">{data.name || routeId}</h3>
+                    <p className="text-gray-700 text-lg">Pedidos: <span className="font-bold text-red-700">{data.count}</span></p>
                     </div>
-                    {/* Observation field */}
-                    <div className="mt-3 w-full">
-                      <label htmlFor={`note-${item.id}`} className="block text-sm font-medium text-gray-700 mb-1">
-                        Observação:
-                      </label>
-                      <textarea
-                        id={`note-${item.id}`}
-                        value={item.note.replace(` (Promoção: ${item.name.replace('!', '')})`, '').trim()} // Remove promo note for editing
-                        onChange={(e) => updateItemNote(item.id, (item.isPromoItem ? ` (Promoção: ${item.name.replace('!', '')}) ` : '') + e.target.value)}
-                        rows="2"
-                        className="w-full p-2 border border-gray-300 rounded-md focus:ring-red-500 focus:border-red-500 text-sm"
-                        placeholder="Ex: Sem glúten, embalar para presente..."
-                      ></textarea>
-                      {item.isPromoItem && (
-                        <p className="text-xs text-red-600 italic mt-1">Item adicionado via promoção.</p>
-                      )}
-                    </div>
-                  </div>
                 ))}
-                <div className="text-right mt-6 pt-6 border-t-2 border-red-300">
-                  <p className="text-2xl font-bold text-gray-800 mb-3">
-                    Total: R$ {cart.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}
-                  </p>
-                  {registeredClient && (
-                    <div className="text-left bg-red-100 p-4 rounded-lg mb-4 text-base text-red-900 shadow-inner">
-                      <p><span className="font-semibold">Cliente Selecionado:</span> {registeredClient.name}</p>
-                      <p><span className="font-semibold">Entrega:</span> {registeredClient.deliveryOption}</p>
-                    </div>
-                  )}
-                  <button
-                    onClick={finalizeOrder}
-                    disabled={loading || cart.length === 0}
-                    className={`mt-4 px-8 py-3 rounded-full text-white font-bold text-xl shadow-xl transition-all duration-300 glow-button
-                      ${loading || cart.length === 0 ? 'bg-gray-400 cursor-not-allowed' : 'bg-green-600 hover:bg-green-700 transform hover:scale-105'}`}
-                  >
-                    {loading ? 'Finalizando...' : 'Finalizar Pedido'}
-                  </button>
-                  {message && (
-                    <p className="mt-3 text-sm font-semibold text-red-700 animate-pulse">{message}</p>
-                  )}
                 </div>
-              </div>
             )}
-          </section>
-        </div>
-
-        {/* Orders List Section */}
-        <section className="w-full bg-gray-50 p-6 rounded-2xl shadow-inner mt-8">
-          <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Acompanhamento de Pedidos</h2>
-          {orders.length === 0 ? (
-            <p className="text-gray-600 italic text-lg">Nenhum pedido finalizado ainda.</p>
-          ) : (
-            <div className="scrollable-list pr-2">
-              {orders.map((order) => (
-                <div
-                  key={order.id}
-                  className="bg-white p-5 mb-4 rounded-xl shadow-md flex flex-col md:flex-row justify-between items-start md:items-center border border-gray-100 hover:shadow-lg transition-all duration-300"
-                >
-                  <div className="mb-4 md:mb-0 md:w-1/2">
-                    <h3 className="text-2xl font-bold text-red-800 mb-2">Pedido #{order.id.substring(0, 8)}...</h3> {/* Shortened ID for display */}
-                    <p className="text-gray-700 text-sm mb-1">Data: <span className="font-medium">{order.timestamp}</span></p>
-                    <p className="text-xl font-bold text-gray-900 mb-2">Total: R$ {order.total.toFixed(2)}</p>
-                    <p className={`text-lg font-bold 
-                      ${order.status === 'Pendente' ? 'text-red-600' : 
-                         order.status === 'Em Separação' ? 'text-orange-500' :
-                         order.status === 'Separado' ? 'text-purple-600' :
-                         order.status === 'Aguardando Retirada' ? 'text-blue-600' :
-                         order.status === 'Em Rota de Entrega' ? 'text-teal-600' : 'text-green-600'}`}>
-                      Status: {order.status}
-                    </p>
-                    {order.finalDeliveryOption && (
-                      <p className="text-sm text-gray-600 mt-1"><span className="font-semibold">Entrega Final:</span> {order.finalDeliveryOption} {order.deliveryFee > 0 && `(R$ ${order.deliveryFee.toFixed(2)})`}</p>
-                    )}
-                    {order.clientInfo && (
-                      <div className="mt-3 text-sm text-gray-600 bg-gray-100 p-3 rounded-lg border border-gray-200">
-                        <p><span className="font-semibold">Cliente:</span> {order.clientInfo.name}</p>
-                        <p><span className="font-semibold">Telefone:</span> {order.clientInfo.phone}</p>
-                        <p><span className="font-semibold">Endereço:</span> {order.clientInfo.address}{order.clientInfo.complement && `, ${order.clientInfo.complement}`}</p>
-                        <p><span className="font-semibold">Pagamento:</span> {order.clientInfo.paymentMethod}</p>
-                        <p><span className="font-semibold">Entrega Preferida:</span> {order.clientInfo.deliveryOption}</p>
-                      </div>
-                    )}
-                  </div>
-                  <div className="w-full md:w-1/2 md:pl-6">
-                    <h4 className="font-semibold text-gray-800 mb-2 text-lg">Itens do Pedido:</h4>
-                    <ul className="list-disc list-inside text-gray-700 space-y-1">
-                      {order.items.map((item) => (
-                        <li key={item.id} className="text-base">
-                          {item.name} (<span className="font-medium">{item.quantity}x</span>)
-                          {item.note && <span className="text-gray-500 italic ml-2"> (Obs: {item.note})</span>}
-                        </li>
-                      ))}
-                    </ul>
-                    {/* Botões de status */}
-                    <div className="mt-4 flex flex-wrap gap-2">
-                      {order.status === 'Pendente' && (
-                        <button
-                          onClick={() => updateOrderStatus(order.id, 'Em Separação')}
-                          className="bg-red-700 hover:bg-red-800 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
-                        >
-                          Marcar Em Separação
-                        </button>
-                      )}
-                      {order.status === 'Em Separação' && (
-                        <button
-                          onClick={() => updateOrderStatus(order.id, 'Separado')}
-                          className="bg-purple-600 hover:bg-purple-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
-                        >
-                          Marcar Separado (Decidir Entrega)
-                        </button>
-                      )}
-                      {/* Botões para o cliente ou admin após 'Separado' */}
-                      {(order.status === 'Aguardando Retirada' || order.status === 'Em Rota de Entrega') && (
-                        <button
-                          onClick={() => updateOrderStatus(order.id, 'Finalizado')}
-                          className="bg-green-600 hover:bg-green-700 text-white text-sm py-2 px-4 rounded-full shadow-md transition-all duration-300 transform hover:scale-105"
-                        >
-                          Marcar como Finalizado
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
-        {/* Route Stats Section - Novo */}
-        <section className="w-full bg-gray-50 p-6 rounded-2xl shadow-inner mt-8">
-          <h2 className="text-3xl font-bold text-gray-800 mb-5 pb-3 border-b-4 border-red-400">Estatísticas de Rotas</h2>
-          {Object.keys(routeStats).length === 0 ? (
-            <p className="text-gray-600 italic text-lg">Nenhum dado de rota disponível ainda.</p>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Object.entries(routeStats).map(([routeId, data]) => (
-                <div key={routeId} className="bg-white p-4 rounded-lg shadow-md border border-gray-100">
-                  <h3 className="text-xl font-semibold text-gray-900">{data.name || routeId}</h3>
-                  <p className="text-gray-700 text-lg">Pedidos: <span className="font-bold text-red-700">{data.count}</span></p>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+            </section>
+        )}
       </main>
 
-      {/* Promotions Footer Section */}
-      <footer className="w-full max-w-4xl bg-gradient-to-br from-red-700 to-red-900 text-white p-8 rounded-3xl shadow-2xl mt-10 text-center">
+      {/* Promotions Footer Section - GLOBAL */}
+      <footer className="w-full bg-gradient-to-br from-red-700 to-red-900 text-white p-8 rounded-t-3xl shadow-2xl mt-10 text-center">
         <h2 className="text-4xl font-extrabold mb-5 tracking-tight">Últimas Promoções!</h2>
         <p className="text-xl font-light mb-8 opacity-90">Não perca nossas ofertas incríveis. Adicione diretamente ao seu carrinho!</p>
         <div className="promotions-carousel flex overflow-x-auto snap-x snap-mandatory pb-6 space-x-6 px-2">
-          {promotions.map((promo) => (
-            <div
-              key={promo.id}
-              className="flex-shrink-0 w-72 bg-red-600 p-5 rounded-2xl shadow-xl flex flex-col items-center text-center snap-center border border-red-500 hover:bg-red-500 transition-all duration-300 transform hover:scale-105 cursor-pointer"
-              onClick={() => addToCart(promo, true)} // Make entire card clickable
-            >
-              <img
-                src={promo.imageUrl}
-                alt={promo.name}
-                className="w-24 h-24 rounded-full object-cover mb-3 border-4 border-white shadow-md"
-              />
-              <h3 className="text-xl font-bold text-white mb-2">{promo.name}</h3>
-              <p className="text-red-100 text-sm mb-3 line-clamp-2">{promo.description}</p>
-              <p className="text-lg font-semibold text-red-200 line-through mb-1">De: R$ {promo.originalPrice ? promo.originalPrice.toFixed(2) : 'N/A'}</p>
-              <p className="text-3xl font-extrabold text-yellow-300 mb-4 drop-shadow-lg">Por: R$ {promo.promoPrice ? promo.promoPrice.toFixed(2) : 'N/A'}</p>
-              <button
-                className="bg-white hover:bg-gray-100 text-red-700 font-bold py-2.5 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-10glow"
-              >
-                Adicionar à Promoção
-              </button>
-            </div>
-          ))}
+          {promotions.length === 0 ? (
+              <p className="text-gray-200 italic text-lg w-full text-center">Nenhuma promoção disponível no momento.</p>
+          ) : (
+              promotions.map((promo) => (
+                  <div
+                  key={promo.id}
+                  className="flex-shrink-0 w-72 bg-red-600 p-5 rounded-2xl shadow-xl flex flex-col items-center text-center snap-center border border-red-500 hover:bg-red-500 transition-all duration-300 transform hover:scale-105 cursor-pointer"
+                  onClick={() => addToCart(promo, true)}
+                  >
+                  <img
+                      src={promo.imageUrl}
+                      alt={promo.name}
+                      className="w-24 h-24 rounded-full object-cover mb-3 border-4 border-white shadow-md"
+                  />
+                  <h3 className="text-xl font-bold text-white mb-2">{promo.name}</h3>
+                  <p className="text-red-100 text-sm mb-3 line-clamp-2">{promo.description}</p>
+                  <p className="text-lg font-semibold text-red-200 line-through mb-1">De: R$ {promo.originalPrice ? promo.originalPrice.toFixed(2) : 'N/A'}</p>
+                  <p className="text-3xl font-extrabold text-yellow-300 mb-4 drop-shadow-lg">Por: R$ {promo.promoPrice ? promo.promoPrice.toFixed(2) : 'N/A'}</p>
+                  <button
+                      className="bg-white hover:bg-gray-100 text-red-700 font-bold py-2.5 px-6 rounded-full shadow-lg transition-all duration-300 transform hover:scale-10glow"
+                  >
+                      Adicionar à Promoção
+                  </button>
+                  </div>
+              ))
+          )}
         </div>
       </footer>
 
@@ -1228,7 +1265,7 @@ function App() {
         </div>
       )}
 
-      {/* Delivery Decision Modal - NOVA MODAL */}
+      {/* Delivery Decision Modal */}
       {showDeliveryDecisionModal && selectedOrderForDelivery && (
         <div className="modal-overlay" onClick={() => setShowDeliveryDecisionModal(false)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
