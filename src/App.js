@@ -1,6 +1,7 @@
+/* global grecaptcha */ // Adicionado para resolver o erro 'grecaptcha is not defined' do ESLint
 import React, { useState, useEffect } from 'react';
 import { initializeApp } from 'firebase/app';
-import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth'; // Adicionados: RecaptchaVerifier, signInWithPhoneNumber
+import { getAuth, signInAnonymously, onAuthStateChanged, signInWithCustomToken, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
 import { getFirestore, collection, onSnapshot, query, addDoc, updateDoc, doc, getDoc, setDoc } from 'firebase/firestore';
 
 
@@ -9,7 +10,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyDa90bifuUXRgGyS30Y-P9Q6NhOnLyn21s", // SEU VALOR AQUI
   authDomain: "deliveryvitoriaapp.firebaseapp.com", // SEU VALOR AQUI
   projectId: "deliveryvitoriaapp", // SEU VALOR AQUI
-  storageBucket: "deliveryvitoriaapp.firebaseystorage.app", // SEU VALOR AQUI
+  storageBucket: "deliveryvitoriaapp.firebasestorage.app", // SEU VALOR AQUI
   messagingSenderId: "97567737035", // SEU VALOR AQUI
   appId: "1:97567737035:web:0b509a3c0bb0242474c74e" // SEU VALOR AQUI
 };
@@ -265,7 +266,7 @@ function App() {
     if (!isAuthReady || !dbInstance || !userId) return;
 
     const ordersCollectionRef = collection(dbInstance, `artifacts/${appIdForBuild}/users/${userId}/orders`);
-    const q = query(ordersCollectionRef);
+    const q = query(ordersRef);
 
     const unsubscribeOrders = onSnapshot(q, (snapshot) => {
       const ordersData = snapshot.docs.map(doc => ({
@@ -1794,5 +1795,6 @@ function App() {
 }
 
 export default App;
+
 
 
